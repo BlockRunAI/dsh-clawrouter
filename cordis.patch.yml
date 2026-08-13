@@ -1,0 +1,30 @@
+# dsh-clawrouter — BlockRun for DeepSeek Harness.
+#
+# A patch layer replaces a row's whole `config` rather than merging keys, so a
+# profile overriding either row below must restate every key it needs.
+#
+# Credentials are REFERENCES, never values: `walletKeyEnv` names the environment
+# variable (or managed credential) holding the wallet key, resolved per request
+# through `ctx.credentials`. No secret belongs in this file.
+- insert:
+    # The BlockRun provider route. Registers `blockrun` on ctx.llm, paid per
+    # request in USDC over x402. Adding this route does NOT change the agent's
+    # default model — `dsh-base` keeps `deepseek-official`, and this route is
+    # selected explicitly (or used by the review gate below).
+    - id: blockrun-llm
+      name: dsh-clawrouter
+      config:
+        walletKeyEnv: BASE_CHAIN_WALLET_KEY
+
+    # The review gate. A strong model inspects risky tool calls before they run
+    # and answers allow / deny / escalate-to-human.
+    #
+    # Disabled by default: intercepting tool execution is the user's decision to
+    # make, not ours, and the gate costs a model call. Enable with
+    # `enabled: true` in your profile's cordis.patch.yml.
+    - id: blockrun-review
+      name: dsh-clawrouter/review
+      config:
+        enabled: false
+        reviewerProvider: blockrun
+        reviewerModel: anthropic/claude-opus-5
