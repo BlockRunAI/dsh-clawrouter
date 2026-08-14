@@ -4,6 +4,15 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.2 — 2026-08-14
+
+### Fixed
+- **`/spend` overstated a real charge by more than double.** Measured against a funded wallet: three calls capped at 24 output tokens cost $0.006, three capped at 4096 cost $0.006, and one that generated **8,000** output tokens cost **$0.002** — the same per call every time. Settlement follows the signed 402 quote and does not depend on what the model produces. Pricing that last call from its tokens gave $0.004243.
+
+  The meter no longer converts tokens into money at all. It reports `calls x price` and carries token counts as counts — exact for ordinary calls, a floor for very large inputs, and blind to a request that failed after paying.
+
+  0.3.1's explanation was wrong in the other direction: it said the figure would read *low* because settlement is priced on `max_tokens`. Raising `max_tokens` from 24 to 4096 changed the charge not at all. Both stories were models built from reading code; only the wallet settled it.
+
 ## 0.3.1 — 2026-08-14
 
 ### Fixed

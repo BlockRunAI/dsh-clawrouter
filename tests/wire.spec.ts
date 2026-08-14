@@ -134,15 +134,7 @@ describe('spend metering through a real request', () => {
     expect(summary.calls).toBe(1)
     expect(summary.inputTokens).toBe(10)
     expect(summary.outputTokens).toBe(2)
-    expect(summary.requestFeesUsd).toBeCloseTo(0.001, 10)
-  })
-
-  it('prices it from the catalog the gateway served', async () => {
-    const meter = new SpendMeter(0)
-    await run(adapter(undefined, meter))
-    // The stub catalog prices neither model, so the call is counted and
-    // reported as unpriced rather than silently valued at zero.
-    expect(meter.summary().unpricedCalls).toBe(1)
+    expect(summary.totalUsd).toBeCloseTo(0.001, 10)
   })
 
   it('counts nothing when no meter is attached', async () => {

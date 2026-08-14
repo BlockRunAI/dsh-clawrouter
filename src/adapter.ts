@@ -189,7 +189,7 @@ export class BlockrunAdapter extends LlmAdapter {
     const meter = this.#options.meter
     if (meter !== undefined) {
       for (const chunk of chunks) {
-        if (chunk.type === 'usage') meter.record(model, chunk.usage, this.#options.catalog.rates.get(model))
+        if (chunk.type === 'usage') meter.record(model, chunk.usage)
       }
     }
     return chunks

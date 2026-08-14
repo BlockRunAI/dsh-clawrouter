@@ -29,7 +29,7 @@ import type {} from '@deepseek-ai/dsh-commands'
 export { BlockrunAdapter } from './adapter.ts'
 export { BlockrunCatalog } from './catalog.ts'
 export { StreamTranslator } from './translate.ts'
-export { renderSpend, SpendMeter, tokenCost } from './spend.ts'
+export { renderSpend, SpendMeter } from './spend.ts'
 export type { ModelRates, ModelSpend, SpendSummary } from './spend.ts'
 export type { BlockrunCatalogModel, BlockrunStreamChunk, ReviewVerdict, RiskMatch } from './types.ts'
 
@@ -75,9 +75,9 @@ export interface Config {
   /** Per-request SDK timeout in milliseconds. */
   timeoutMs?: number
   /**
-   * Flat per-request fee this deployment is charged, used by `/spend`.
-   * Configurable because it is BlockRun's published price rather than a
-   * protocol constant, and a stale number here is a wrong total.
+   * What one request costs on this deployment, used by `/spend`.
+   * Configurable because it is a published price rather than a protocol
+   * constant, and a stale number here is a wrong total.
    */
   requestFeeUsd?: number
   /**

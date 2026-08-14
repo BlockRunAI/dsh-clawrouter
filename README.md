@@ -107,9 +107,13 @@ Mentioning a command is not running one — `grep -rn "rm -rf" docs/` is not fla
 
 What this route has cost since the process started — total, per model, tokens and flat fees separately.
 
-Treat it as a **floor**, and it says so. What settles on chain is the signed 402 quote, and the gateway prices that quote on estimated input plus `max_tokens` — the cap, not the tokens the model went on to produce — so a request capped at 4096 that answers in 50 is charged for far more than it used. This counts actual reported usage and reads low by that gap. Only completed calls are counted, and a model the catalog publishes no rate for is reported as unpriced rather than as free. Your wallet balance is the authority.
+**This route is priced per request, not per token.** Measured against a funded wallet: three calls capped at 24 output tokens cost $0.006, three capped at 4096 cost $0.006, and one that generated 8,000 output tokens cost $0.002 — the same per call every time. What settles is the signed 402 quote, and settlement does not depend on what the model then produces.
 
-The default `requestFeeUsd` is `0.002` because that is what the gateway quotes: a 402 for a ~17-token request returns `{"amount":"0.002000"}`, and three calls moved a wallet by exactly $0.006. BlockRun's published pricing page currently says $0.001.
+So `/spend` reports `calls x price` and carries token counts as counts, never converting them into money. Pricing that 8,000-token call from its tokens gave $0.004243, more than double the real charge.
+
+The figure is exact for ordinary calls, a **floor** for very large inputs (whose quote is higher than the per-request price), and blind to a request that failed after paying. Your wallet balance is the authority.
+
+The default `requestFeeUsd` is `0.002` because that is what the gateway quotes: a 402 for a ~17-token request returns `{"amount":"0.002000"}`. BlockRun's published pricing page currently says $0.001.
 
 ### 3. `/review`
 
@@ -195,7 +199,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 176 offline tests, including two real-cordis-Loader compositions
+npm test          # 172 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 
