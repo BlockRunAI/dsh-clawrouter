@@ -180,11 +180,15 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 141 offline tests, including two real-cordis-Loader compositions
+npm test          # 146 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 
 The live suite is the only thing that exercises the x402 handshake, because the signature *is* the authentication and no mock can stand in for it. It is deliberately excluded from `npm test` so it never runs by accident.
+
+## Changelog
+
+See [CHANGELOG.md](https://github.com/BlockRunAI/dsh-clawrouter/blob/main/CHANGELOG.md). Several early releases fixed silent bugs, so upgrading is worth it if you are on an earlier version.
 
 ## License
 

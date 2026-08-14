@@ -178,11 +178,15 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 ## 开发
 
 ```sh
-npm test          # 141 个离线测试，含两套走真实 cordis Loader 的组合测试
+npm test          # 146 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
 ```
 
 只有这套 live 测试会真正走一遍 x402 握手：签名本身就是认证，任何 mock 都替代不了。它被刻意排除在 `npm test` 之外，不会被误跑。
+
+## 更新日志
+
+见 [CHANGELOG.md](https://github.com/BlockRunAI/dsh-clawrouter/blob/main/CHANGELOG.md)。早期几个版本修的都是不报错的静默 bug，用着旧版本的话建议升级。
 
 ## 许可证
 
