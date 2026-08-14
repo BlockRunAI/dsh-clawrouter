@@ -25,7 +25,7 @@ DeepSeek is fast and cheap — keep it for the loop.<br><br>
 [![Base](https://img.shields.io/badge/Base-USDC-0052FF?style=flat-square&logo=coinbase&logoColor=white)](https://base.org)
 [![Telegram](https://img.shields.io/badge/Telegram-Community-26A5E4?style=flat-square&logo=telegram)](https://t.me/blockrunAI)
 
-English | [中文](README.zh.md)
+English | [中文](https://github.com/BlockRunAI/dsh-clawrouter/blob/main/docs/README.zh.md)
 
 </div>
 
