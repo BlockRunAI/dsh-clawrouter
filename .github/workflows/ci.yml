@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The engines range this package declares. 22.19 is the floor the
+        # harness itself requires; 24 is the other supported major.
+        node: ['22.19', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # `--ignore-scripts` skips this package's own `prepare` build so the
+      # steps below exercise it explicitly and report their own failures,
+      # instead of an install that dies with a build error.
+      - run: npm ci --ignore-scripts
+
+      - run: npx tsc --noEmit
+
+      - run: npm run build
+
+      - run: npm test
+
+      # The published entry points must load from built output under plain
+      # Node, not just typecheck: a wrong `exports` map or a stray CJS import
+      # only fails here.
+      - name: Smoke-test the published entry points
+        run: |
+          node --input-type=module -e "
+            const index = await import('./lib/index.js')
+            const review = await import('./lib/review.js')
+            for (const [name, mod] of [['index', index], ['review', review]]) {
+              for (const key of ['name', 'inject', 'Config', 'apply']) {
+                if (!(key in mod)) throw new Error(\`lib/\${name}.js is missing the plugin export \${key}\`)
+              }
+              // A default export beside the function-plugin exports makes the
+              // cordis Loader discard this module's inject metadata.
+              if ('default' in mod) throw new Error(\`lib/\${name}.js must not have a default export\`)
+            }
+            console.log('entry points OK')
+          "
+
+  # Live gateway tests spend real USDC, so they never run on push. Trigger
+  # them by hand when the payment path or the reviewer prompt changed.
+  e2e:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: live-gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19'
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm run build
+
+      - name: Live gateway e2e
+        # Self-skips when the secret is absent, so a fork or an unconfigured
+        # repository reports success rather than a spurious failure.
+        env:
+          BASE_CHAIN_WALLET_KEY: ${{ secrets.BASE_CHAIN_WALLET_KEY }}
+        run: npm run test:e2e
