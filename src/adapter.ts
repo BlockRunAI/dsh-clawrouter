@@ -108,9 +108,10 @@ export class BlockrunAdapter extends LlmAdapter {
         'UNSUPPORTED',
       )
     }
-    // Resolved before the first byte so a missing wallet fails naming the
-    // credential rather than surfacing as an opaque SDK constructor throw.
+    // Credential first: it is a local check, and a deployment with no wallet
+    // has a more fundamental problem than whichever model it named.
     const privateKey = await this.#options.resolveWalletKey()
+    await this.#assertServable(options.model, options.signal)
     const connection = this.#options.connection()
     const body = buildRequestBody(options)
 
@@ -148,6 +149,32 @@ export class BlockrunAdapter extends LlmAdapter {
         // on its failure; the caller's own abort or error is the real outcome.
       })
     }
+  }
+
+  /**
+   * Reject a model this route is known not to serve, before any request goes
+   * out.
+   *
+   * A typo would otherwise reach the gateway and come back as a bare `HTTP
+   * 400`, which names neither the model nor the route.
+   *
+   * A catalog this adapter could not read is NOT treated as "model unknown":
+   * the check exists to catch a demonstrably wrong id, and refusing a request
+   * because our own listing was unavailable would turn a transient gateway
+   * blip into an outage.
+   */
+  async #assertServable(model: string, signal?: AbortSignal): Promise<void> {
+    let known: readonly LlmModelInfo[]
+    try {
+      known = await this.#options.catalog.list(signal)
+    } catch {
+      return
+    }
+    if (known.length === 0 || known.some(entry => entry.id === model)) return
+    throw new LlmError(
+      `BlockRun does not serve model "${model}"; call listModels() for the current catalog`,
+      'UNKNOWN_MODEL',
+    )
   }
 }
 

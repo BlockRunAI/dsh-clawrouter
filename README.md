@@ -122,6 +122,15 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 - **No spend projection.** Harness session logs refuse event types a build does not know, and an out-of-repo plugin cannot mark its events ignorable — so this plugin writes no session events. Settled costs are in `~/.blockrun/cost_log.jsonl`.
 - **Smart routing (`blockrun/auto`) is not wired up yet.** Pin a model id for now.
 
+## Development
+
+```sh
+npm test          # 68 offline tests, including two real-cordis-Loader compositions
+npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
+```
+
+The live suite is the only thing that exercises the x402 handshake, because the signature *is* the authentication and no mock can stand in for it. It is deliberately excluded from `npm test` so it never runs by accident.
+
 ## License
 
 MIT
