@@ -4,7 +4,12 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.5.0 — 2026-08-14
+## 0.5.1 — 2026-08-14
+
+### Fixed
+- A bare string was passed where the e2e vision test needed a branded `AttachmentId`. The test typecheck reported it and 0.5.0 was published anyway — the check is only worth having if publishing waits for it, so `prepublishOnly` now runs both typecheck programs and the unit suite.
+
+
 
 ### Added
 - **Vision.** DeepSeek serves no vision model, so this is capability rather than savings. A user message carrying an image now serializes to OpenAI content parts with the attachment inlined as a `data:` URL; a message without one still serializes to a bare string, so text traffic is unchanged on the wire. Images are read through the optional attachment service, resolved per request, and several in one turn resolve concurrently.

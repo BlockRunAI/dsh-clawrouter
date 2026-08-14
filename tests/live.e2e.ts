@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from '../src/adapter.ts'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { BlockrunCatalog, projectCatalog } from '../src/catalog.ts'
 import { buildReviewPrompt, matchRisk, parseVerdict, REVIEW_SYSTEM_PROMPT } from '../src/reviewer.ts'
 
@@ -313,7 +314,7 @@ live('vision', () => {
       messages: [createUserMessage({
         content: [
           { type: 'text', text: 'What colour fills this image? Answer with one word.' },
-          { type: 'image', attachment: { attachmentId: 'live', mediaType: 'image/png', bytes: 0, width: 8, height: 8 } },
+          { type: 'image', attachment: { attachmentId: AttachmentId('live'), mediaType: 'image/png', bytes: 0, width: 8, height: 8 } },
         ],
         source: { kind: 'user' },
       })],
