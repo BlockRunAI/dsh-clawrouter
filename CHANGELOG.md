@@ -4,6 +4,12 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.2.5 — 2026-08-14
+
+### Fixed
+- **A cancelled turn could pop an approval prompt.** The review wrapper caught every error, including the caller's own abort, and turned it into an `uncertain` verdict — which escalates. Cancelling a turn mid-review therefore asked a human to approve a call nobody was waiting for. A caller abort now declines instead.
+- **A turn cancelled *before* the review started hung for the full timeout.** The caller's signal was wired up with `addEventListener`, and a listener added to an already-aborted signal never fires — so the one case where the answer was known immediately was the one case that waited 30 seconds. The caller's signal and the deadline are now combined with `AbortSignal.any`, which propagates an already-aborted signal.
+
 ## 0.2.4 — 2026-08-14
 
 ### Fixed

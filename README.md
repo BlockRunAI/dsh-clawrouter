@@ -174,13 +174,13 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 - **Reasoning-effort selection is refused** rather than quietly ignored.
 - **An aborted request stops delivery immediately, but the in-flight HTTP request is not itself cancelled** until `@blockrun/llm` accepts an `AbortSignal`; the socket closes on the SDK's own timeout.
 - **No spend projection.** Harness session logs refuse event types a build does not know, and an out-of-repo plugin cannot mark its events ignorable — so this plugin writes no session events. Settled costs are in `~/.blockrun/cost_log.jsonl`.
-- **Smart routing (`blockrun/auto`) is not wired up yet.** Pin a model id for now.
+- **Smart routing (`blockrun/auto`) is not wired up**, and not for lack of a router. A virtual model has to report one context window, and the harness sizes compaction from it: report the largest candidate and a turn routed to a smaller model overflows with compaction never firing; report the smallest and every session compacts far too early. Until that has an honest answer, pin a model id — `auxiliaryModel` already moves the expensive maintenance calls, which is where the savings actually were.
 - **Prior-turn reasoning is not sent back.** DeepSeek's thinking-mode guide says `reasoning_content` should be returned on tool-call turns, but this one route serves <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models from many vendors, and a field one of them requires is a field another may reject. Multi-step tool use on a reasoning model may be slightly degraded as a result; please report it if you hit it.
 
 ## Development
 
 ```sh
-npm test          # 149 offline tests, including two real-cordis-Loader compositions
+npm test          # 150 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 

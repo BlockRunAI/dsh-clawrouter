@@ -153,22 +153,24 @@ export function apply(ctx: Context, config: Config): void {
     return text
   }
 
-  /** Review one proposed call, bounded by {@link Config.timeoutMs}. */
+  /**
+   * Review one proposed call, bounded by {@link Config.timeoutMs}.
+   *
+   * The caller's signal and the deadline are combined with `AbortSignal.any`
+   * rather than by hand. Adding an `abort` listener to a signal that has
+   * ALREADY aborted never fires it, so a turn cancelled before the review
+   * began used to sit here for the whole timeout — the one case where the
+   * answer was already known.
+   */
   const review = async (exec: ToolExecution, prompt: string): Promise<ReviewVerdict> => {
-    const controller = new AbortController()
-    const abortOnCaller = (): void => controller.abort(exec.signal.reason)
-    exec.signal.addEventListener('abort', abortOnCaller, { once: true })
-    const timer = setTimeout(() => controller.abort(new Error('review timed out')), timeoutMs)
+    const signal = AbortSignal.any([exec.signal, AbortSignal.timeout(timeoutMs)])
     try {
-      return parseVerdict(await askReviewer(prompt, controller.signal))
+      return parseVerdict(await askReviewer(prompt, signal))
     } catch (error) {
       return {
         ruling: 'uncertain',
         reason: `The safety reviewer could not be reached (${describe(error)}).`,
       }
-    } finally {
-      clearTimeout(timer)
-      exec.signal.removeEventListener('abort', abortOnCaller)
     }
   }
 
@@ -192,6 +194,11 @@ export function apply(ctx: Context, config: Config): void {
         return { kind: 'deny', reason: `${verdict.reason} (safety review: ${match.rule})` }
       case 'uncertain': {
         const reason = `${verdict.reason} (safety review: ${match.rule})`
+        // The caller cancelled while the review was in flight, so the review
+        // failed for a reason that has nothing to do with the command. Asking
+        // a human to approve a call nobody is waiting for is worse than
+        // declining it, and the turn is going away regardless.
+        if (exec.signal.aborted) return { kind: 'deny', reason: 'Cancelled before the safety review finished.' }
         if (onFailure === 'deny') return { kind: 'deny', reason }
         // Escalating REPLACES the rest of the chain, because a waterfall
         // listener that returns without delegating short-circuits it. So the

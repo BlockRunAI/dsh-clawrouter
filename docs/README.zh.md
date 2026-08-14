@@ -172,13 +172,13 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 - **推理档位（reasoning effort）同样是明确拒绝**，不会被静默忽略。
 - **中断请求会立刻停止投递，但底层 HTTP 请求本身还取消不了**——要等 `@blockrun/llm` 支持 `AbortSignal`，目前连接会在 SDK 自己的超时后关闭。
 - **没有花费投影（spend projection）。** Harness 的会话日志会拒绝它不认识的事件类型，而仓库外的插件无法把自己的事件标记为可忽略——所以本插件不写任何会话事件。实际结算金额在 `~/.blockrun/cost_log.jsonl`。
-- **智能路由（`blockrun/auto`）尚未接入**，目前请直接指定模型 id。
+- **智能路由（`blockrun/auto`）尚未接入**，缺的不是路由器。虚拟模型必须报告**一个**上下文窗口，而 Harness 用它来决定何时压缩：报最大的，某一轮路由到小模型时会直接溢出且压缩永不触发；报最小的，所有会话都会过早压缩。在这个问题有诚实答案之前，请直接指定模型 id —— `auxiliaryModel` 已经把真正花钱的维护调用挪走了，省钱的部分本来就在那里。
 - **上一轮的 reasoning 不会回传。** DeepSeek 的思考模式文档要求在带 tool call 的轮次回传 `reasoning_content`，但这一条路由要服务 <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个来自不同厂商的模型——某一家要求的字段，另一家可能直接拒绝。所以推理模型配合多步工具调用时效果可能略有下降，遇到了请反馈。
 
 ## 开发
 
 ```sh
-npm test          # 149 个离线测试，含两套走真实 cordis Loader 的组合测试
+npm test          # 150 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
 ```
 

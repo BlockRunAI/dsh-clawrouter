@@ -38,7 +38,7 @@ afterEach(async () => {
 })
 
 /** How the stub reviewer should behave for one test. */
-type ReviewerBehavior = { kind: 'reply'; text: string } | { kind: 'throw' }
+type ReviewerBehavior = { kind: 'reply'; text: string } | { kind: 'throw' } | { kind: 'hang' }
 
 let behavior: ReviewerBehavior = { kind: 'reply', text: '{"ruling":"safe","reason":"ok"}' }
 
@@ -47,6 +47,18 @@ class StubAdapter extends LlmAdapter {
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     asked.push(options.messages.map(m => m.content.map(b => b.type === 'text' ? b.text : '').join('')).join('\n'))
     if (behavior.kind === 'throw') throw new Error('reviewer offline')
+    if (behavior.kind === 'hang') {
+      // Settles only on abort. The `aborted` check is not belt-and-braces: by
+      // the time a cancelled call reaches an adapter the signal is usually
+      // already aborted, and a listener added then never fires — which is the
+      // very bug this test exists to catch.
+      await new Promise<void>((resolve) => {
+        const signal = options.signal
+        if (signal === undefined || signal.aborted) return resolve()
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+      throw new Error('reviewer aborted')
+    }
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text: behavior.text }
     yield { type: 'block-end', index: 0, block: { type: 'text', text: behavior.text } }
@@ -331,5 +343,31 @@ describe('the gate only ever narrows', () => {
     expect(text(result)).toContain(DOWNSTREAM_REASON)
     expect(ran).toEqual([])
     downstreamDenies = false
+  }, 30_000)
+})
+
+describe('a cancelled turn', () => {
+  it('does not prompt a human for a call nobody is waiting for', async () => {
+    // The reviewer hangs; the caller cancels while it is in flight. That
+    // failure says nothing about the command, and the turn is going away —
+    // escalating would put an approval prompt on screen for a cancelled call.
+    behavior = { kind: 'hang' }
+    ran.length = 0
+    const ctx = await boot(ENABLED)
+    const controller = new AbortController()
+
+    const pending = ctx.tools.execute({
+      signal: controller.signal,
+      callId: CallId('cancelled-call'),
+      name: 'bash',
+      arguments: { command: 'rm -rf ~' },
+      agent: agent(ctx),
+    })
+    controller.abort(new Error('user cancelled the turn'))
+    const result = await pending
+
+    expect(result.isError).toBe(true)
+    expect(ran).toEqual([])
+    behavior = { kind: 'reply', text: '{"ruling":"safe","reason":"ok"}' }
   }, 30_000)
 })
