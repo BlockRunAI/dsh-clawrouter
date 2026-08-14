@@ -97,6 +97,8 @@ Mentioning a command is not running one — `grep -rn "rm -rf" docs/` is not fla
         pattern: "deploy\\s+--env[= ]prod"
 ```
 
+**If you mistype `reviewerModel`**, every flagged command escalates or is denied — which looks exactly like the gate working cautiously. The failure now carries the cause, so a denial reads *"BlockRun does not serve model … Did you mean …?"* rather than a bare timeout, and a warning is logged wherever a log exporter is composed.
+
 **When the reviewer is unreachable**, the gate escalates to you (`onReviewerFailure: ask`, the default). It never silently allows — a safety gate that fails open is worse than none — and never hard-blocks on a network blip. Unattended automation can set `deny`.
 
 ### 2. `/spend`
@@ -215,7 +217,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 181 offline tests, including two real-cordis-Loader compositions
+npm test          # 183 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 

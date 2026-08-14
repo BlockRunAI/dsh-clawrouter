@@ -14,7 +14,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, LlmError } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 // Side-effect type import: the commands package declares `ctx.commands` by
@@ -123,6 +123,9 @@ export function apply(ctx: Context, config: Config): void {
     : DEFAULT_REVIEW_TIMEOUT_MS
   const onFailure = config.onReviewerFailure ?? 'ask'
   const rules = [...DEFAULT_RISK_RULES, ...compileExtraRules(config.extraRules ?? [])]
+  // Reported once, not per call: a misconfigured reviewer fails on every risky
+  // command, and repeating the same warning would bury it.
+  let configurationReported = false
 
   /** Run one reviewer request and return its complete text. */
   const askReviewer = async (prompt: string, signal: AbortSignal): Promise<string> => {
@@ -147,7 +150,12 @@ export function apply(ctx: Context, config: Config): void {
         // escalates to a human like any other.
         if (text.length >= MAX_REVIEWER_RESPONSE_CHARS) break
       } else if (chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')) {
-        throw new Error(`reviewer stream ended: ${chunk.reason.kind}`)
+        // The runtime normalizes most adapter failures into a terminal chunk
+        // rather than a throw, so the failure's code lives here and nowhere
+        // else. Flattening this to a bare Error discarded it, and with it any
+        // chance of telling a misconfigured reviewer from an unreachable one.
+        const { failure } = chunk.reason
+        throw new LlmError(`reviewer stream ended: ${failure.message}`, failure.code, { cause: failure })
       }
     }
     return text
@@ -167,6 +175,20 @@ export function apply(ctx: Context, config: Config): void {
     try {
       return parseVerdict(await askReviewer(prompt, signal))
     } catch (error) {
+      // A reviewer that cannot exist is a configuration mistake, and it
+      // degrades into exactly the shape of the gate working: every risky
+      // command escalates, or is denied, forever. Nothing downstream can tell
+      // the two apart — an approval prompt shows the harness's own wording,
+      // not this reason — so the mistake is said out loud, where the person
+      // who just edited the config is looking.
+      if (!configurationReported && isConfigurationFailure(error)) {
+        configurationReported = true
+        ctx.logger.error(
+          `blockrun-review: reviewer "${reviewerModel}" on provider "${reviewerProvider}" cannot be used, so every`
+          + ' flagged command will escalate or be denied. Check reviewerModel and reviewerProvider.',
+        )
+        ctx.logger.error(error)
+      }
       return {
         ruling: 'uncertain',
         reason: `The safety reviewer could not be reached (${describe(error)}).`,
@@ -261,6 +283,27 @@ function compileExtraRules(rules: readonly { name: string; pattern: string; tool
       throw new Error(`blockrun-review: risk rule "${rule.name}" has an invalid pattern: ${describe(error)}`)
     }
   })
+}
+
+/**
+ * Whether a reviewer failure is a configuration mistake rather than a blip.
+ *
+ * The distinction decides whether a human is told. A timeout or a dropped
+ * connection is worth retrying silently; a model or route that does not exist,
+ * or a credential that is missing, will fail identically on every future call
+ * and only a person can fix it.
+ * @param error - the failure raised while asking the reviewer.
+ * @returns whether it names a fixable configuration problem.
+ */
+function isConfigurationFailure(error: unknown): boolean {
+  const code = (error as { failure?: { code?: unknown } })?.failure?.code
+  if (typeof code === 'string') {
+    return ['UNKNOWN_MODEL', 'NO_ADAPTER', 'MISSING_CREDENTIAL', 'INVALID_CREDENTIAL', 'AUTH', 'UNSUPPORTED'].includes(code)
+  }
+  // The harness flattens an LlmError raised across a duplicated module copy to
+  // an untyped failure, so the text is the only signal left in that case.
+  const message = error instanceof Error ? error.message : String(error)
+  return /does not serve model|no adapter|MISSING_CREDENTIAL|INVALID_CREDENTIAL/i.test(message)
 }
 
 /** A short human-readable cause for a failure surfaced to a user or the model. */

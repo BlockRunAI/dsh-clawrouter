@@ -371,3 +371,43 @@ describe('a cancelled turn', () => {
     behavior = { kind: 'reply', text: '{"ruling":"safe","reason":"ok"}' }
   }, 30_000)
 })
+
+describe('a misconfigured reviewer', () => {
+  it('says so, instead of quietly turning into "ask a human about everything"', async () => {
+    // A reviewer naming a model that does not exist fails on every risky
+    // command. Downstream that is indistinguishable from the gate working
+    // cautiously — the approval prompt shows the harness's own wording, not
+    // the verdict reason — so the only place the mistake can surface is a log.
+    // A provider route nothing registered, so the real llm runtime produces
+    // the real failure (NO_ADAPTER) rather than a synthetic throw.
+    ran.length = 0
+    const ctx = await boot(['    enabled: true', "    reviewerProvider: 'not-registered'", "    reviewerModel: 'x'"])
+    const errors: string[] = []
+    const original = ctx.logger.error.bind(ctx.logger)
+    ctx.logger.error = ((value: unknown) => {
+      errors.push(typeof value === 'string' ? value : String(value))
+      return original(value as never)
+    }) as typeof ctx.logger.error
+
+    await callBash(ctx, 'rm -rf ~')
+
+    expect(errors.some(line => /reviewer .* cannot be used/.test(line))).toBe(true)
+    expect(errors.some(line => /reviewerModel and reviewerProvider/.test(line))).toBe(true)
+    expect(ran).toEqual([])
+  }, 30_000)
+
+  it('reports it once, not on every flagged command', async () => {
+    const ctx = await boot(['    enabled: true', "    reviewerProvider: 'not-registered'", "    reviewerModel: 'x'"])
+    const errors: string[] = []
+    const original = ctx.logger.error.bind(ctx.logger)
+    ctx.logger.error = ((value: unknown) => {
+      if (typeof value === 'string') errors.push(value)
+      return original(value as never)
+    }) as typeof ctx.logger.error
+
+    for (let i = 0; i < 3; i++) await callBash(ctx, 'rm -rf ~')
+
+    // Repeating an identical warning per call buries the one that matters.
+    expect(errors.filter(line => /cannot be used/.test(line))).toHaveLength(1)
+  }, 30_000)
+})

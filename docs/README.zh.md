@@ -95,6 +95,8 @@ dsh plugin --profile web add dsh-clawrouter
         pattern: "deploy\\s+--env[= ]prod"
 ```
 
+**如果 `reviewerModel` 写错了**，每一条被标记的命令都会升级或被拒绝——这看起来和「闸门在谨慎工作」一模一样。现在失败会带上原因，所以拒绝信息里会直接写「BlockRun does not serve model … Did you mean …?」，而不是一句干巴巴的超时；在有日志导出器的组合里还会额外记一条警告。
+
 **审查模型不可用时**，默认交给你处理（`onReviewerFailure: ask`）。它绝不会默默放行——失效即放行的安全闸门比没有更糟；也不会因为一次网络抖动就把会话卡死。无人值守的自动化可以改成 `deny`。
 
 ### 2. `/spend`
@@ -213,7 +215,7 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 ## 开发
 
 ```sh
-npm test          # 181 个离线测试，含两套走真实 cordis Loader 的组合测试
+npm test          # 183 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
 ```
 

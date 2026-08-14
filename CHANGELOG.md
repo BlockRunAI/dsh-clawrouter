@@ -4,6 +4,15 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.8 — 2026-08-14
+
+### Fixed
+- **A mistyped `reviewerModel` was indistinguishable from the gate working.** Every flagged command escalated or was denied, with no hint that the reviewer itself could not exist — a broken safety feature looks identical to a cautious one from the user's seat, and with `onReviewerFailure: deny` it would block risky commands forever with no clue why.
+
+  The cause is now carried: a denial reads *"BlockRun does not serve model "anthropic/claude-opus5" … Did you mean "anthropic/claude-opus-5"?"*, verified in a real session.
+
+  That works because the reviewer's failure is no longer flattened. The harness reports most adapter failures as a terminal chunk rather than a throw, and this code turned that into a bare `reviewer stream ended: error`, discarding the code and message the diagnosis needed. Configuration failures are also logged once — useful where a log exporter is composed, though `dsh-base` composes none, so the reason string is the channel that actually reaches a headless user.
+
 ## 0.3.7 — 2026-08-14
 
 ### Added
