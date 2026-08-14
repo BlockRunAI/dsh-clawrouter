@@ -1,10 +1,35 @@
-# dsh-clawrouter
+<div align="center">
+
+<h1>dsh-clawrouter</h1>
+
+<p>A second brain for your DeepSeek Harness agent.<br>
+DeepSeek is fast and cheap — keep it for the loop.<br><br>
+<strong>This adds what it cannot do: a stronger model reviews the dangerous command before it runs.</strong><br><br>
+<em><!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models from one wallet. No accounts. No API keys. No credit card.</em></p>
+
+<br>
+
+<img src="https://img.shields.io/badge/🛡️_Review_Before_Execute-success?style=for-the-badge" alt="Review before execute">&nbsp;
+<img src="https://img.shields.io/badge/🧠_Claude_Reviews_DeepSeek-black?style=for-the-badge" alt="Claude reviews DeepSeek">&nbsp;
+<img src="https://img.shields.io/badge/🔑_Zero_API_Keys-blue?style=for-the-badge" alt="No API keys">&nbsp;
+<img src="https://img.shields.io/badge/💰_x402_USDC-purple?style=for-the-badge" alt="x402 USDC">
+
+[![npm version](https://img.shields.io/npm/v/dsh-clawrouter.svg?style=flat-square&color=cb3837)](https://npmjs.com/package/dsh-clawrouter)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-clawrouter.svg?style=flat-square&color=blue)](https://npmjs.com/package/dsh-clawrouter)
+[![GitHub stars](https://img.shields.io/github/stars/BlockRunAI/dsh-clawrouter?style=flat-square&label=GitHub%20stars)](https://github.com/BlockRunAI/dsh-clawrouter)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness_Plugin-4D6BFE?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
+[![x402 Protocol](https://img.shields.io/badge/x402-Micropayments-purple?style=flat-square)](https://x402.org)
+[![Base](https://img.shields.io/badge/Base-USDC-0052FF?style=flat-square&logo=coinbase&logoColor=white)](https://base.org)
+[![Telegram](https://img.shields.io/badge/Telegram-Community-26A5E4?style=flat-square&logo=telegram)](https://t.me/blockrunAI)
 
 English | [中文](README.zh.md)
 
-**A second brain for your DeepSeek Harness agent.**
+</div>
 
-DeepSeek is cheap and fast, and you should keep using it for the loop. This plugin adds the things it *cannot* do: have a stronger model review a dangerous command before it runs, and reach 70 models from one wallet — no accounts, no API keys, no credit card.
+> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models) is reachable from one wallet with no accounts and no API keys, paid per request in USDC over [x402](https://x402.org). MIT licensed.
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -17,12 +42,25 @@ dsh plugin --profile web add dsh-clawrouter
 Two things people keep asking for in the Harness discussions:
 
 > 「是否有类似 Codex 或者 CC 的审查模式？即额外调用模型审查指令，以解放双手？Full Access 还是太让人担心了。」
+> — [#421](https://github.com/deepseek-ai/deepseek-harness/discussions/421)
 > *Is there a review mode like Codex or Claude Code — call an extra model to review the command, to free up my hands? Full Access is too worrying.*
 
 > 「使用 Full Access 模式创建并测试插件时误删了我的整个家目录」
+> — [#461](https://github.com/deepseek-ai/deepseek-harness/discussions/461)
 > *Testing a plugin in Full Access mode, it deleted my entire home directory.*
 
-`Full Access` is all-or-nothing: approve everything by hand, or approve nothing and hope. This plugin adds a third option — **a different, stronger model looks at the dangerous commands before they run.**
+`Full Access` is all-or-nothing: approve every command by hand, or approve nothing and hope. This adds a third option.
+
+## How it compares
+
+|                      | Approve everything | Full Access      | Permission rules   | **dsh-clawrouter**            |
+| -------------------- | ------------------ | ---------------- | ------------------ | ----------------------------- |
+| **Hands-free**       | No                 | Yes              | Yes                | **Yes**                       |
+| **Catches `rm -rf ~`** | Only if you notice | No               | Only if you wrote the rule | **Yes**               |
+| **Understands intent** | You do           | Nothing does     | No — literal match | **Yes, a model reads it**     |
+| **Enforced where**   | UI prompt          | —                | Executor           | **Executor**                  |
+| **Fails**            | —                  | open             | closed             | **to a human, never open**    |
+| **Reviews ordinary work** | Everything    | Nothing          | Nothing            | **Nothing**                   |
 
 ## What it does
 
@@ -32,7 +70,7 @@ When the agent proposes something destructive, a strong model (default `anthropi
 
 | Verdict | What happens |
 |---|---|
-| safe | the call proceeds to the normal permission chain, untouched |
+| safe | proceeds to the normal permission chain, untouched |
 | dangerous | **denied**, with a reason the agent can act on |
 | uncertain | **escalated to you** — the normal approval prompt |
 
@@ -41,24 +79,23 @@ It only ever *narrows*. A call the reviewer clears still faces every sandbox, pe
 Enable it in your profile's `cordis.patch.yml`:
 
 ```yaml
-- update:
-    - id: blockrun-review
-      config:
-        enabled: true
-        reviewerModel: anthropic/claude-opus-5
+- id: blockrun-review
+  config:
+    enabled: true
+    reviewerModel: anthropic/claude-opus-5
 ```
 
-**What gets reviewed.** Deliberately narrow — a gate that fires on ordinary work gets switched off, and then it protects nobody. Ordinary reads, edits, and builds are never reviewed. The shipped rules flag recursive deletes, raw disk writes, fork bombs, `curl … | sh`, force-pushes and hard resets, `chmod 777`, `sudo`, and anything touching `~/.ssh`, `~/.aws`, or `/etc/passwd`.
+**What gets reviewed.** Deliberately narrow — a gate that fires on ordinary work gets switched off, and then it protects nobody. Reads, edits and builds are never reviewed. The shipped rules flag recursive deletes, raw disk writes, fork bombs, `curl … | sh`, force-pushes and hard resets, `chmod 777`, `sudo`, and anything touching `~/.ssh`, `~/.aws`, or `/etc/passwd`.
 
-Mentioning a command is not running one — `grep -rn "rm -rf" docs/` is not flagged. Add your own rules with `extraRules`:
+Mentioning a command is not running one — `grep -rn "rm -rf" docs/` is not flagged. Add your own rules:
 
 ```yaml
-        extraRules:
-          - name: no-prod-deploy
-            pattern: "deploy\\s+--env[= ]prod"
+    extraRules:
+      - name: no-prod-deploy
+        pattern: "deploy\\s+--env[= ]prod"
 ```
 
-**When the reviewer is unreachable**, the gate escalates to you (`onReviewerFailure: ask`, the default). It never silently allows — a safety gate that fails open is worse than none — and it never hard-blocks on a network blip. Unattended automation can set `deny` instead.
+**When the reviewer is unreachable**, the gate escalates to you (`onReviewerFailure: ask`, the default). It never silently allows — a safety gate that fails open is worse than none — and never hard-blocks on a network blip. Unattended automation can set `deny`.
 
 ### 2. `/review`
 
@@ -66,22 +103,22 @@ Mentioning a command is not running one — `grep -rn "rm -rf" docs/` is not fla
 /review <paste a diff, a plan, or the agent's conclusion>
 ```
 
-Runs the same strong model over material you choose. Useful for the case one user described: the agent read the right evidence, drew the wrong conclusion, and only a direct challenge surfaced the real bug.
+Runs the same strong model over material you choose. For the case one user [reported](https://github.com/deepseek-ai/deepseek-harness/discussions/475): the agent read the right evidence, drew the wrong conclusion, and only a direct challenge surfaced the real bug.
 
-### 3. 70 models from one wallet
+### 3. <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models from one wallet
 
-Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over [x402](https://x402.org). No signup, no KYC, no credit card, no per-lab account.
+Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account.
 
-That matters most for the models DeepSeek does not serve — Claude, GPT, Gemini, Grok, and vision models — which is exactly what a reviewer or a second opinion needs.
+That matters most for models DeepSeek does not serve — Claude, GPT, Gemini, Grok — which is exactly what a reviewer needs.
 
-## Setup
+## Quick Start
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
 export BASE_CHAIN_WALLET_KEY=0x...   # or store it via the credentials service
 ```
 
-$5 of USDC on Base covers thousands of calls. The key is a **reference** in configuration (`walletKeyEnv`) and is resolved per request, so rotating it takes effect on the very next call and no secret ever enters a config file.
+$5 of USDC on Base covers thousands of calls. The key is a **reference** in configuration (`walletKeyEnv`), resolved per request — rotating it takes effect on the very next call, and no secret enters a config file.
 
 ## Configuration
 
@@ -91,7 +128,7 @@ $5 of USDC on Base covers thousands of calls. The key is a **reference** in conf
 |---|---|---|
 | `provider` | `blockrun` | harness route key to register |
 | `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | credential *reference* holding the EVM wallet key |
-| `apiUrl` | `https://blockrun.ai/api` | API root; point at another gateway if you have one |
+| `apiUrl` | `https://blockrun.ai/api` | API root |
 | `timeoutMs` | `300000` | per-request timeout |
 
 `blockrun-review` — the gate:
@@ -100,9 +137,9 @@ $5 of USDC on Base covers thousands of calls. The key is a **reference** in conf
 |---|---|---|
 | `enabled` | `false` | whether the automatic gate intercepts tool calls |
 | `reviewerProvider` | `blockrun` | provider route carrying the reviewer |
-| `reviewerModel` | `anthropic/claude-opus-5` | reviewer model — use a *different, stronger* model than the agent |
+| `reviewerModel` | `anthropic/claude-opus-5` | use a *different, stronger* model than the agent |
 | `timeoutMs` | `30000` | how long one review may take |
-| `onReviewerFailure` | `ask` | `ask` escalates to you; `deny` blocks (for unattended runs) |
+| `onReviewerFailure` | `ask` | `ask` escalates to you; `deny` blocks (unattended runs) |
 | `extraRules` | `[]` | additional `{name, pattern, tools}` risk rules |
 
 Mounting the route does **not** change your default model. `dsh-base` keeps `deepseek-official`; this route is used only where you ask for it.
@@ -116,7 +153,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 
 ## Known limitations
 
-- **Images are refused, not silently dropped.** Sending image content through this route fails with `UNSUPPORTED`; vision is planned.
+- **Images are refused, not silently dropped** — image content through this route fails with `UNSUPPORTED`; vision is planned.
 - **Reasoning-effort selection is refused** rather than quietly ignored.
 - **An aborted request stops delivery immediately, but the in-flight HTTP request is not itself cancelled** until `@blockrun/llm` accepts an `AbortSignal`; the socket closes on the SDK's own timeout.
 - **No spend projection.** Harness session logs refuse event types a build does not know, and an out-of-repo plugin cannot mark its events ignorable — so this plugin writes no session events. Settled costs are in `~/.blockrun/cost_log.jsonl`.
@@ -133,4 +170,4 @@ The live suite is the only thing that exercises the x402 handshake, because the 
 
 ## License
 
-MIT
+[MIT](LICENSE)

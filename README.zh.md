@@ -1,10 +1,35 @@
-# dsh-clawrouter
+<div align="center">
+
+<h1>dsh-clawrouter</h1>
+
+<p>给 DeepSeek Harness 智能体配一个「第二大脑」。<br>
+DeepSeek 又快又便宜，主循环就该继续用它。<br><br>
+<strong>这个插件补的是它做不到的事：危险命令执行前，让更强的模型先审一遍。</strong><br><br>
+<em>一个钱包直调 <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个模型。不注册账号，不用 API Key，不用信用卡。</em></p>
+
+<br>
+
+<img src="https://img.shields.io/badge/🛡️_执行前审查-success?style=for-the-badge" alt="执行前审查">&nbsp;
+<img src="https://img.shields.io/badge/🧠_Claude_审_DeepSeek-black?style=for-the-badge" alt="Claude 审 DeepSeek">&nbsp;
+<img src="https://img.shields.io/badge/🔑_零_API_Key-blue?style=for-the-badge" alt="零 API Key">&nbsp;
+<img src="https://img.shields.io/badge/💰_x402_USDC-purple?style=for-the-badge" alt="x402 USDC">
+
+[![npm version](https://img.shields.io/npm/v/dsh-clawrouter.svg?style=flat-square&color=cb3837)](https://npmjs.com/package/dsh-clawrouter)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-clawrouter.svg?style=flat-square&color=blue)](https://npmjs.com/package/dsh-clawrouter)
+[![GitHub stars](https://img.shields.io/github/stars/BlockRunAI/dsh-clawrouter?style=flat-square&label=GitHub%20stars)](https://github.com/BlockRunAI/dsh-clawrouter)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness_插件-4D6BFE?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
+[![x402 Protocol](https://img.shields.io/badge/x402-微支付-purple?style=flat-square)](https://x402.org)
+[![Base](https://img.shields.io/badge/Base-USDC-0052FF?style=flat-square&logo=coinbase&logoColor=white)](https://base.org)
+[![Telegram](https://img.shields.io/badge/Telegram-社区-26A5E4?style=flat-square&logo=telegram)](https://t.me/blockrunAI)
 
 [English](README.md) | 中文
 
-**给 DeepSeek Harness 智能体配一个"第二大脑"。**
+</div>
 
-DeepSeek 又快又便宜，主循环就该继续用它。这个插件补的是它做不到的事：在危险命令执行之前，让一个更强的模型先审一遍；以及用一个钱包直接调用 70 个模型——不用注册账号，不用 API Key，不用信用卡。
+> **dsh-clawrouter** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，把一个更强的模型放在智能体危险操作的前面。当智能体准备执行 `rm -rf ~`，审查模型会读一遍并给出放行 / 拒绝 / 交给你——由真实的工具执行器强制执行，而不是靠提示词劝阻。它同时注册一条 BlockRun provider 路由，让审查模型（以及全部 <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个模型）都能用一个钱包直接调用：不注册账号、不用 API Key，通过 [x402](https://x402.org) 用 USDC 按次付费。MIT 许可。
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -17,10 +42,23 @@ dsh plugin --profile web add dsh-clawrouter
 社区里反复出现的两件事：
 
 > 「是否有类似 Codex 或者 CC 的审查模式？即额外调用模型审查指令，以解放双手？Full Access 还是太让人担心了。」
+> —— [#421](https://github.com/deepseek-ai/deepseek-harness/discussions/421)
 
 > 「使用 Full Access 模式创建并测试插件时误删了我的整个家目录」
+> —— [#461](https://github.com/deepseek-ai/deepseek-harness/discussions/461)
 
-`Full Access` 是全有或全无：要么每条命令都手动批准，要么什么都不批直接赌一把。这个插件提供第三种选择——**让另一个更强的模型，在危险命令执行前先看一眼。**
+`Full Access` 是全有或全无：要么每条命令都手动批准，要么什么都不批直接赌一把。这个插件提供第三种选择。
+
+## 对比
+
+|                    | 全部手动批准     | Full Access | 权限规则           | **dsh-clawrouter**       |
+| ------------------ | ---------------- | ----------- | ------------------ | ------------------------ |
+| **解放双手**       | 否               | 是          | 是                 | **是**                   |
+| **能拦住 `rm -rf ~`** | 你得正好看见  | 否          | 只有你写过这条规则 | **能**                   |
+| **理解意图**       | 靠你自己         | 无          | 否，只做字面匹配   | **能，模型真的在读**     |
+| **在哪里强制**     | UI 弹窗          | —           | 执行器             | **执行器**               |
+| **失效时**         | —                | 放行        | 拒绝               | **交给人，绝不默默放行** |
+| **会审查日常操作** | 全都审           | 都不审      | 都不审            | **都不审**               |
 
 ## 它做什么
 
@@ -39,24 +77,23 @@ dsh plugin --profile web add dsh-clawrouter
 在 profile 的 `cordis.patch.yml` 里启用：
 
 ```yaml
-- update:
-    - id: blockrun-review
-      config:
-        enabled: true
-        reviewerModel: anthropic/claude-opus-5
+- id: blockrun-review
+  config:
+    enabled: true
+    reviewerModel: anthropic/claude-opus-5
 ```
 
-**哪些会被审查。** 刻意做得很窄——一个动不动就报警的闸门，最后一定会被关掉，那就等于没有保护。普通的读取、编辑、构建从不触发。内置规则只盯：递归删除、裸写磁盘、fork 炸弹、`curl … | sh`、强制推送与 hard reset、`chmod 777`、`sudo`，以及碰 `~/.ssh`、`~/.aws`、`/etc/passwd` 的操作。
+**哪些会被审查。** 刻意做得很窄——一个动不动就报警的闸门，最后一定会被关掉，那就等于没有保护。读取、编辑、构建从不触发。内置规则只盯：递归删除、裸写磁盘、fork 炸弹、`curl … | sh`、强制推送与 hard reset、`chmod 777`、`sudo`，以及碰 `~/.ssh`、`~/.aws`、`/etc/passwd` 的操作。
 
-**提到一条命令不等于执行它**——`grep -rn "rm -rf" docs/` 不会被拦。可以用 `extraRules` 加自己的规则：
+**提到一条命令不等于执行它**——`grep -rn "rm -rf" docs/` 不会被拦。可以加自己的规则：
 
 ```yaml
-        extraRules:
-          - name: no-prod-deploy
-            pattern: "deploy\\s+--env[= ]prod"
+    extraRules:
+      - name: no-prod-deploy
+        pattern: "deploy\\s+--env[= ]prod"
 ```
 
-**审查模型不可用时**，默认交给你处理（`onReviewerFailure: ask`）。它绝不会默默放行——一个失效即放行的安全闸门比没有更糟；也不会因为一次网络抖动就把会话卡死。无人值守的自动化可以改成 `deny`。
+**审查模型不可用时**，默认交给你处理（`onReviewerFailure: ask`）。它绝不会默默放行——失效即放行的安全闸门比没有更糟；也不会因为一次网络抖动就把会话卡死。无人值守的自动化可以改成 `deny`。
 
 ### 2. `/review`
 
@@ -64,15 +101,15 @@ dsh plugin --profile web add dsh-clawrouter
 /review <粘贴 diff、方案，或者智能体给出的结论>
 ```
 
-用同一个强模型审你指定的内容。有用户反馈过这种情况：智能体其实已经读到了关键证据，却先下了错误结论，直到被人追问才发现真正的 bug——这个命令就是干这个的。
+用同一个强模型审你指定的内容。有用户[反馈过](https://github.com/deepseek-ai/deepseek-harness/discussions/475)这种情况：智能体其实已经读到了关键证据，却先下了错误结论，直到被人追问才发现真正的 bug。
 
-### 3. 一个钱包，70 个模型
+### 3. 一个钱包，<!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个模型
 
-注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 [x402](https://x402.org) 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
+注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
 
-这一点在 DeepSeek 覆盖不到的模型上最有价值——Claude、GPT、Gemini、Grok 以及视觉模型，而这恰恰是"审查"和"第二意见"需要的。
+这一点在 DeepSeek 覆盖不到的模型上最有价值——Claude、GPT、Gemini、Grok，而这恰恰是「审查」需要的。
 
-## 安装
+## 快速开始
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -98,9 +135,9 @@ Base 链上 5 美元的 USDC 够跑几千次调用。配置里写的是**引用*
 |---|---|---|
 | `enabled` | `false` | 是否自动拦截工具调用 |
 | `reviewerProvider` | `blockrun` | 审查模型所在的路由 |
-| `reviewerModel` | `anthropic/claude-opus-5` | 审查模型——要选一个和智能体**不同且更强**的模型 |
+| `reviewerModel` | `anthropic/claude-opus-5` | 要选一个和智能体**不同且更强**的模型 |
 | `timeoutMs` | `30000` | 单次审查的时间上限 |
-| `onReviewerFailure` | `ask` | `ask` 交给你；`deny` 直接拒绝（适合无人值守） |
+| `onReviewerFailure` | `ask` | `ask` 交给你；`deny` 直接拒绝（无人值守） |
 | `extraRules` | `[]` | 追加的 `{name, pattern, tools}` 风险规则 |
 
 装上这条路由**不会**改变你的默认模型。`dsh-base` 依然是 `deepseek-official`，只有你显式指定时才会走这条路由。
@@ -108,7 +145,7 @@ Base 链上 5 美元的 USDC 够跑几千次调用。配置里写的是**引用*
 ## 几句实话
 
 - **这不会让 DeepSeek 变便宜。** 对话按厂商原价计费，外加每次请求 $0.001 的固定费用，而且 BlockRun 目前不计入 DeepSeek 的缓存命中折扣——所以把主循环挂到这上面反而**更贵**。主循环请继续直连 DeepSeek，这个插件只用来做 DeepSeek 做不了的事。
-- **免费额度只能用来验证插件通不通，不能当主力。** 免费的 NVIDIA 模型可能会把提示词用于服务改进，所以别拿它对着私有代码库跑，更不要用它当审查模型。
+- **免费额度只能用来验证插件通不通，不能当主力。** 免费的 NVIDIA 模型可能会把提示词用于服务改进，别拿它对着私有代码库跑，更不要用它当审查模型。
 - **每次审查都是一次模型调用**，只在命中风险规则时触发，上限 30 秒。
 - **审查模型只看到被标记的那一次工具调用**，不会看到整个仓库。
 
@@ -131,4 +168,4 @@ npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）�
 
 ## 许可证
 
-MIT
+[MIT](LICENSE)
