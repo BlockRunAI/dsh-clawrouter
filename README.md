@@ -168,7 +168,7 @@ export BASE_CHAIN_WALLET_KEY=0x...   # or store it via the credentials service
 
 This plugin reads neither file on its own. A credential nobody configured, quietly shadowing the one they did, is exactly what the harness credentials seam exists to prevent — so it only ever reads the reference you name.
 
-$5 of USDC on Base covers thousands of calls. The key is a **reference** in configuration (`walletKeyEnv`), resolved per request — rotating it takes effect on the very next call, and no secret enters a config file.
+$5 of USDC on Base covers about **2,500** gate reviews, which run at the $0.002 floor — and about **5** calls carrying a 100K-token context on Opus. Both figures are the same $5; fund for the way you intend to use the route rather than for its floor. The key is a **reference** in configuration (`walletKeyEnv`), resolved per request — rotating it takes effect on the very next call, and no secret enters a config file.
 
 ## Configuration
 

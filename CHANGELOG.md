@@ -4,7 +4,15 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.3.11 — 2026-08-14
+## 0.3.12 — 2026-08-14
+
+### Fixed
+- **"$5 covers thousands of calls" quoted only the flattering end of a range this document measures.** True at the $0.002 floor, where $5 buys about 2,500 gate reviews. At the other end of the same table it buys about five 100K-context calls on Opus — a 500x spread, given as one number, in the paragraph where a reader decides how much to fund. Both figures are stated now, with the advice to fund for intended use rather than for the floor.
+
+### Added
+- **The funding advice is checked as arithmetic.** Each promised call count must equal the funding amount divided by a price the pricing table states. The gate rejects the old slogan and, separately, a version that quotes an accurate 2,500 without its counterweight — a correct number can still mislead by being the only one offered.
+
+
 
 ### Fixed
 - **A third pricing claim disagreed with the measured table.** The compaction section said a ~100K-token summarization runs $0.50 on Claude Opus 5 and $0.014 on DeepSeek V4 Flash. Live 402 quotes at that size read **$0.901** and **$0.0262** — both understated by about 1.8x, the signature of the per-token estimate this project disproved in 0.3.2. The argument for moving compaction to a cheap model gets stronger, not weaker: the real gap is 34x.

@@ -15,6 +15,19 @@ function keysOf(schema: unknown): string[] {
   return Object.keys((schema as { dict?: Record<string, unknown> }).dict ?? {})
 }
 
+/** Per-model USD quotes from the "small / ~22K in / ~112K in" table. */
+function pricingTable(doc: string): Map<string, number[]> {
+  const rows = new Map<string, number[]>()
+  for (const line of doc.split('\n')) {
+    const cells = line.split('|').map(cell => cell.trim())
+    if (cells.length !== 6) continue
+    const model = cells[1]?.match(/^`([^`]+)`$/)?.[1]
+    const usd = cells.slice(2, 5).map(cell => Number(cell.match(/\$([\d.]+)/)?.[1]))
+    if (model && usd.every(value => Number.isFinite(value))) rows.set(model, usd as number[])
+  }
+  return rows
+}
+
 describe('README documents the real configuration', () => {
   it.each([
     ['blockrun-llm', Index.Config],
@@ -53,19 +66,6 @@ describe('the pricing claims agree with the pricing table', () => {
   // table existed, corrected in one place, and left standing in the other; the
   // surviving copy is the one a reader happens to hit. Prose is now checked
   // against the table mechanically, because reading for it did not work.
-
-  /** Per-model USD quotes from the "small / ~22K in / ~112K in" table. */
-  function pricingTable(doc: string): Map<string, number[]> {
-    const rows = new Map<string, number[]>()
-    for (const line of doc.split('\n')) {
-      const cells = line.split('|').map(cell => cell.trim())
-      if (cells.length !== 6) continue
-      const model = cells[1]?.match(/^`([^`]+)`$/)?.[1]
-      const usd = cells.slice(2, 5).map(cell => Number(cell.match(/\$([\d.]+)/)?.[1]))
-      if (model && usd.every(value => Number.isFinite(value))) rows.set(model, usd as number[])
-    }
-    return rows
-  }
 
   it.each([['English', EN], ['Chinese', ZH]])('%s: the table parses and covers both compaction models', (_l, doc) => {
     const table = pricingTable(doc)
@@ -120,5 +120,35 @@ describe('the pricing claims agree with the pricing table', () => {
     for (const stale of ['provider cost plus', '厂商原价', 'flat $0.001/request', '每次请求 $0.001']) {
       expect(doc, `still claims "${stale}"`).not.toContain(stale)
     }
+  })
+})
+
+describe('the funding advice is arithmetic, not a slogan', () => {
+  // "$5 covers thousands of calls" was true at the $0.002 floor and wrong by
+  // 500x at the other end of the same table, in the section where a reader
+  // decides how much to send. Quoting only the flattering end of a range the
+  // document itself measures is the same defect as quoting a stale figure.
+  const FUNDING_USD = 5
+
+  /** The two call counts the funding paragraph promises, in document order. */
+  function fundingCounts(doc: string): number[] {
+    const paragraph = doc.split('\n').find(line => line.includes('walletKeyEnv') && line.includes(String(FUNDING_USD)))
+    expect(paragraph, 'no funding paragraph found').toBeDefined()
+    return [...paragraph!.matchAll(/\*\*([\d,]+)\*\*/g)].map(match => Number(match[1]!.replace(/,/g, '')))
+  }
+
+  it.each([['English', EN], ['Chinese', ZH]])('%s: quotes both ends of the price range', (_label, doc) => {
+    expect(fundingCounts(doc)).toHaveLength(2)
+  })
+
+  it.each([['English', EN], ['Chinese', ZH]])('%s: each count is the funding amount divided by a price the table states', (_label, doc) => {
+    const [atFloor, atContext] = fundingCounts(doc)
+    const floorPrice = pricingTable(doc).get('deepseek/deepseek-chat')![0]!
+    const opusAt112k = pricingTable(doc).get('anthropic/claude-opus-5')![2]!
+    expect(atFloor! * floorPrice).toBeCloseTo(FUNDING_USD, 1)
+    // The large-context end is rounded to one digit, so allow the rounding but
+    // not a different order of magnitude — the point is the 500x spread.
+    expect(atContext! * opusAt112k).toBeGreaterThan(FUNDING_USD * 0.8)
+    expect(atContext! * opusAt112k).toBeLessThan(FUNDING_USD * 1.3)
   })
 })
