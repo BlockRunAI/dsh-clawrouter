@@ -187,7 +187,7 @@ $5 of USDC on Base covers thousands of calls. The key is a **reference** in conf
 
 The harness compacts long sessions by summarizing them — and it does that on **whatever model the conversation is using**. On a flagship model that means paying flagship input rates to summarize, repeatedly, for the whole session.
 
-A ~100K-token compaction runs about **$0.50 on Claude Opus 5** and about **$0.014 on DeepSeek V4 Flash**. Summarizing is a job a cheap model does well, and those calls share no prefix with your conversation — so moving them forfeits no prompt-cache hit:
+A ~100K-token compaction runs about **$0.90 on Claude Opus 5** and about **$0.026 on DeepSeek V4 Flash** — read from live 402 quotes at that size, consistent with the table above. Summarizing is a job a cheap model does well, and those calls share no prefix with your conversation — so moving them forfeits no prompt-cache hit:
 
 ```yaml
 - id: blockrun-llm

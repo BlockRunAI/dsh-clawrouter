@@ -4,7 +4,17 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.3.10 — 2026-08-14
+## 0.3.11 — 2026-08-14
+
+### Fixed
+- **A third pricing claim disagreed with the measured table.** The compaction section said a ~100K-token summarization runs $0.50 on Claude Opus 5 and $0.014 on DeepSeek V4 Flash. Live 402 quotes at that size read **$0.901** and **$0.0262** — both understated by about 1.8x, the signature of the per-token estimate this project disproved in 0.3.2. The argument for moving compaction to a cheap model gets stronger, not weaker: the real gap is 34x.
+
+### Added
+- **The README's prose is now checked against its own pricing table.** Three releases in a row shipped a dollar figure in prose that contradicted the table a few sections above it, so the check is mechanical rather than editorial. Above the flat floor the quote is linear in input size — 100K/112K measured 0.89 for Opus and 0.90 for DeepSeek against an input ratio of 0.893 — which gives a tight enough bound to catch a stale estimate.
+
+  The first version of this gate asserted only that the 100K figure fell between the 22K and 112K quotes. Fed the actual bug, it passed: $0.50 sits inside that band. A bound that admits the defect it was written for is worse than no bound, because it reports the claim as verified. Both stale figures are now used as fixtures, per language.
+
+
 
 ### Fixed
 - **The READMEs contradicted themselves about pricing.** One section said, correctly since 0.3.2, that this route is priced per request rather than per token. The "Honest notes" section still carried the original 0.1.0 claim — "provider cost plus a flat $0.001/request" — which 0.3.2 disproved. The correction had been applied in one place and not the other, for eleven releases, in the section named for being honest.
