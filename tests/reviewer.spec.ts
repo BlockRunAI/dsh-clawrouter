@@ -130,3 +130,30 @@ describe('parseVerdict — degenerate input', () => {
     expect(parseVerdict('I think it is fine.').reason).toMatch(/did not return a readable verdict/i)
   })
 })
+
+describe('matchRisk — file bodies are data, not commands', () => {
+  it.each([
+    ['a cleanup script', { file_path: '/proj/clean.sh', content: '#!/bin/sh\nrm -rf ./dist\n' }],
+    ['a Makefile', { file_path: '/proj/Makefile', content: 'clean:\n\trm -rf build\n' }],
+    ['a Dockerfile', { file_path: '/proj/Dockerfile', content: 'RUN rm -rf /var/lib/apt/lists/*\n' }],
+    ['docs quoting a hard reset', { file_path: '/proj/README.md', content: 'To reset:\n\ngit reset --hard origin/main\n' }],
+    ['an edit adding a sudo line', { file_path: '/proj/setup.sh', new_string: 'sudo apt-get install -y jq' }],
+    ['a patch hunk', { file_path: '/proj/a.diff', diff: '+rm -rf /tmp/cache' }],
+  ])('does not flag writing %s', (_label, args) => {
+    // Writing a command is not running it. Flagging a Makefile is exactly how
+    // a gate earns a reputation for crying wolf and gets switched off.
+    expect(matchRisk('write', args)).toBeUndefined()
+  })
+
+  it('still flags the path a write targets, even with a body present', () => {
+    expect(matchRisk('write', {
+      file_path: '/home/me/.ssh/authorized_keys',
+      content: 'ssh-rsa AAAA...',
+    })?.rule).toBe('credential-path')
+  })
+
+  it('still flags the command field of a call that runs something', () => {
+    expect(matchRisk('bash', { command: 'rm -rf ~', description: 'clean up' })?.rule)
+      .toBe('recursive-delete')
+  })
+})

@@ -91,6 +91,34 @@ export function matchRisk(
 }
 
 /**
+ * Argument names that carry a file body rather than anything the call runs.
+ *
+ * Writing a command is not running it. A Makefile with `rm -rf build`, a
+ * cleanup script, a README quoting `git reset --hard` — every one of those is
+ * ordinary work, and every one matched before these fields were excluded,
+ * because the command-position anchor treats the start of a line as a command.
+ * A gate that flags writing a Makefile gets switched off, and then it protects
+ * nothing.
+ *
+ * Excluding bodies costs no coverage: what a file body eventually *does*
+ * happens when something executes it, and that execution is a separate call
+ * whose command field this scan still reads.
+ */
+const BODY_FIELDS: ReadonlySet<string> = new Set([
+  'content',
+  'contents',
+  'new_string',
+  'old_string',
+  'text',
+  'body',
+  'data',
+  'patch',
+  'diff',
+  'source',
+  'template',
+])
+
+/**
  * Render call arguments as the single string the risk patterns scan.
  *
  * Values are joined rather than JSON-stringified so a pattern never has to
@@ -101,7 +129,8 @@ function renderArguments(args: unknown): string {
   if (typeof args === 'string') return args
   if (args === null || typeof args !== 'object') return ''
   const parts: string[] = []
-  for (const value of Object.values(args as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+    if (BODY_FIELDS.has(key)) continue
     if (typeof value === 'string') parts.push(value)
     else if (Array.isArray(value)) parts.push(value.filter(item => typeof item === 'string').join(' '))
   }
