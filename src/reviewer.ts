@@ -57,7 +57,18 @@ export const DEFAULT_RISK_RULES: readonly RiskRule[] = [
   commandRule('history-rewrite', String.raw`git\s+push\b[^;&|\n]*(?:--force(?!-with-lease)\b|\s-f(?:\s|$))`),
   commandRule('hard-reset', String.raw`git\s+reset\s+--hard\b`),
   commandRule('permission-widening', String.raw`chmod\s+(?:-\S+\s+)*(?:777|a\+rwx)\b`),
-  commandRule('home-or-root-target', String.raw`(?:rm|mv|chown|chmod|truncate)\s+(?:-\S+\s+)*(?:~|\$HOME|\/)(?:\s|$)`),
+  commandRule('home-or-root-target', String.raw`(?:rm|mv|chown|chmod|truncate)\s+(?:-\S+\s+)*(?:(?:~|\$HOME)(?:\/|\s|$)|\/(?:\s|$))`),
+  // Recursive deletion under another name: the `rm` rules above see nothing
+  // here, and both of these destroy work that was never committed.
+  commandRule('discard-untracked', String.raw`git\s+clean\b[^;&|\n]*\s-\S*[fF]`),
+  commandRule('find-delete', String.raw`find\s[^;&|\n]*(?:-delete\b|-exec\s+rm\b)`),
+  // Whole-worktree discard. A single-file checkout is routine and stays
+  // unflagged; `.` means every uncommitted change in the tree.
+  commandRule('discard-changes', String.raw`git\s+(?:checkout|restore)\b[^;&|\n]*\s\.(?:\s|$)`),
+  commandRule('infra-destroy', String.raw`terraform\s+destroy\b`),
+  // Irreversible and outward-facing: a registry will not let you take it back,
+  // and an accidental publish is a release other people install.
+  commandRule('package-publish', String.raw`(?:npm|pnpm|yarn)\s+publish\b`),
   // Deliberately last, and NOT built by `commandRule` — that helper's `sudo`
   // prefix is optional, so reusing it here would match every command.
   { name: 'privilege-escalation', tools: [], pattern: /(?:^|[;&|\n(])\s*sudo\s+\S/ },

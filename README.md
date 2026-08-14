@@ -86,7 +86,7 @@ Enable it in your profile's `cordis.patch.yml`:
     reviewerModel: anthropic/claude-opus-5
 ```
 
-**What gets reviewed.** Deliberately narrow — a gate that fires on ordinary work gets switched off, and then it protects nobody. Reads, edits and builds are never reviewed. The shipped rules flag recursive deletes, raw disk writes, fork bombs, `curl … | sh`, force-pushes and hard resets, `chmod 777`, `sudo`, and anything touching `~/.ssh`, `~/.aws`, or `/etc/passwd`.
+**What gets reviewed.** Deliberately narrow — a gate that fires on ordinary work gets switched off, and then it protects nobody. Reads, edits and builds are never reviewed. The shipped rules flag recursive deletes, raw disk writes, fork bombs, `curl … | sh`, force-pushes and hard resets, `chmod 777`, `sudo`, and anything touching `~/.ssh`, `~/.aws`, or `/etc/passwd` — plus destruction that isn't spelled `rm`: `git clean -fdx`, `find … -delete`, `git checkout -- .`, `terraform destroy`, and `npm publish` (a registry will not let you take a release back).
 
 Mentioning a command is not running one — `grep -rn "rm -rf" docs/` is not flagged — and neither is **writing** one: a Makefile containing `rm -rf build`, a cleanup script, or a README quoting `git reset --hard` are all ordinary work. File-body arguments (`content`, `new_string`, `diff`, …) are treated as data, because what a file eventually does happens when something executes it, and that execution is a separate call this gate still reads. Add your own rules:
 
@@ -179,7 +179,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 114 offline tests, including two real-cordis-Loader compositions
+npm test          # 141 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 

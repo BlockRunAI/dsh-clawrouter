@@ -157,3 +157,37 @@ describe('matchRisk — file bodies are data, not commands', () => {
       .toBe('recursive-delete')
   })
 })
+
+describe('matchRisk — destruction that is not spelled rm', () => {
+  it.each([
+    ['git clean -fdx', 'discard-untracked'],
+    ['git clean -xdf .', 'discard-untracked'],
+    ['find . -name "*.ts" -delete', 'find-delete'],
+    ['find /tmp -type f -exec rm -f {} \;', 'find-delete'],
+    ['git checkout -- .', 'discard-changes'],
+    ['git restore .', 'discard-changes'],
+    ['terraform destroy -auto-approve', 'infra-destroy'],
+    ['npm publish', 'package-publish'],
+    ['pnpm publish --access public', 'package-publish'],
+    ['mv ~/project /tmp/gone', 'home-or-root-target'],
+  ])('flags %j', (command, rule) => {
+    expect(matchRisk('bash', { command })?.rule).toBe(rule)
+  })
+
+  it.each([
+    // Every one of these is ordinary work that merely resembles the above.
+    'git clean -n',
+    'git clean --dry-run',
+    'find . -name "*.ts"',
+    'find src -type d',
+    'git checkout -b feature/x',
+    'git checkout main',
+    'git restore --staged README.md',
+    'git checkout -- src/index.ts',
+    'npm run publish-docs',
+    'terraform plan',
+    'mv ./build ./dist',
+  ])('leaves %j alone', (command) => {
+    expect(matchRisk('bash', { command })).toBeUndefined()
+  })
+})

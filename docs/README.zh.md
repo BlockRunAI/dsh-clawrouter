@@ -84,7 +84,7 @@ dsh plugin --profile web add dsh-clawrouter
     reviewerModel: anthropic/claude-opus-5
 ```
 
-**哪些会被审查。** 刻意做得很窄——一个动不动就报警的闸门，最后一定会被关掉，那就等于没有保护。读取、编辑、构建从不触发。内置规则只盯：递归删除、裸写磁盘、fork 炸弹、`curl … | sh`、强制推送与 hard reset、`chmod 777`、`sudo`，以及碰 `~/.ssh`、`~/.aws`、`/etc/passwd` 的操作。
+**哪些会被审查。** 刻意做得很窄——一个动不动就报警的闸门，最后一定会被关掉，那就等于没有保护。读取、编辑、构建从不触发。内置规则只盯：递归删除、裸写磁盘、fork 炸弹、`curl … | sh`、强制推送与 hard reset、`chmod 777`、`sudo`，以及碰 `~/.ssh`、`~/.aws`、`/etc/passwd` 的操作；还有那些**不叫 `rm` 但一样在删东西**的：`git clean -fdx`、`find … -delete`、`git checkout -- .`、`terraform destroy`，以及 `npm publish`（发出去的版本，registry 不让你收回）。
 
 **提到一条命令不等于执行它**——`grep -rn "rm -rf" docs/` 不会被拦；**写下一条命令同样不等于执行它**——包含 `rm -rf build` 的 Makefile、清理脚本、引用了 `git reset --hard` 的 README，都是再正常不过的工作。文件正文类参数（`content`、`new_string`、`diff` 等）一律当作数据看待：文件里的命令真正生效是在有人去执行它的时候，而那一次执行是另一个调用，本闸门照样会读。可以加自己的规则：
 
@@ -177,7 +177,7 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 ## 开发
 
 ```sh
-npm test          # 114 个离线测试，含两套走真实 cordis Loader 的组合测试
+npm test          # 141 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
 ```
 
