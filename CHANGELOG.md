@@ -4,7 +4,12 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.4.1 — 2026-08-14
+## 0.4.2 — 2026-08-14
+
+### Fixed
+- **The install's six `✕ missing peer` lines are now explained before a user meets them.** Walked the first-run path on a clean `DSH_HOME` against the published package: `dsh plugin add` prints six missing-peer errors, and the profile then composes correctly and lists both rows under `--dump-config`. The warnings are cosmetic — the harness supplies those packages at runtime, and every first-party bundle declares its peers the same way — but six red marks during the very first command read as a failed install.
+
+
 
 ### Fixed
 - **npm advertised 70 models while every README said 67.** `package.json`'s description carries the same count on the package page, where an HTML marker cannot go, so filling the markers in 0.3.13 moved the stale copy somewhere less visible rather than removing it. `npm run sync:models` owns that string now and fails loudly if the description stops matching.

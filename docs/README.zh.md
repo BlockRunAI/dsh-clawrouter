@@ -170,6 +170,8 @@ dsh plugin --profile web add dsh-clawrouter
 export BASE_CHAIN_WALLET_KEY=0x...   # 也可以存进 credentials 服务
 ```
 
+**安装时会打印六条 `✕ missing peer`，这是正常的。** 这些包由 harness 在运行时提供，所有第一方 bundle 也都是这么声明 peer 的——反过来直接依赖它们，会让 profile 里出现第二份 cordis，那种坏法要难查得多。已在全新环境实测：profile 正常组装，`dsh --profile web --dump-config` 能列出两行配置。什么都不缺。
+
 **这个 key 从哪来？** 没有 API key 可粘贴——认证方式就是钱包签名。
 
 - **用过 BlockRun 的其他工具？** 那你已经有钱包了。SDK 存在 `~/.blockrun/.session`，ClawRouter 存在 `~/.openclaw/blockrun/wallet.key`。哪个存在就导出哪个：`export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`

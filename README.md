@@ -172,6 +172,8 @@ dsh plugin --profile web add dsh-clawrouter
 export BASE_CHAIN_WALLET_KEY=0x...   # or store it via the credentials service
 ```
 
+**The install prints `✕ missing peer` for six harness packages. That is expected.** The harness itself supplies them at runtime, and every first-party bundle declares its peers the same way — the alternative, depending on them directly, gives the profile a second copy of cordis and breaks the plugin in ways that are much harder to read. Verified on a clean install: the profile composes and `dsh --profile web --dump-config` lists both rows. Nothing is missing.
+
 **Where does the key come from?** There is no API key to paste — authentication is a wallet signature.
 
 - **Already run a BlockRun tool?** You have a wallet already. The SDK keeps it at `~/.blockrun/.session`, ClawRouter at `~/.openclaw/blockrun/wallet.key`. Export whichever exists: `export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
