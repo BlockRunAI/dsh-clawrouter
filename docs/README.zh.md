@@ -107,6 +107,7 @@ dsh plugin --profile web add dsh-clawrouter
 |---|---|
 | 日常操作触发率 | **0/59** —— 包含那些只是**提到**危险命令的（`grep -rn "rm -rf" docs/`、`echo "DROP TABLE" >> notes.md`） |
 | 危险命令漏掉 | **0/39** —— 覆盖 git、容器、集群、云存储、数据库、主机状态 |
+| 抓「以后才执行」的文件 | git hooks、CI workflow、shell 启动文件、launch agent、`.gitconfig`、`.env`、npm `postinstall`、sandbox 提权 —— 10/10，15 条日常文件操作 0 误报 |
 | 抗绕过 | `\rm -rf /`、`command rm`、`env rm`、`eval "rm -rf $DIR"`、`bash -c "…"`、`\| xargs rm`，以及管进 shell 的 heredoc |
 | 触发时的费用 | `claude-opus-5` 上 **$0.0048**，便宜的审查模型 $0.002 |
 | 触发时的延迟 | 约 3 秒 |

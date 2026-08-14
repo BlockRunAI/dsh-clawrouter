@@ -4,7 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.7.0 — 2026-08-14
+## 0.8.0 — 2026-08-14
+
+### Fixed
+- **Every rule assumed a shell command; file writes caught 2 of 10.** Writing `.git/hooks/pre-commit`, `.github/workflows/ci.yml`, `~/.bashrc`, a LaunchAgent, `.gitconfig`, `.env`, or an npm `postinstall` all executes code later — on the next commit, the next CI run holding your secrets, the next install on someone else's machine. None were flagged; the two that were, were caught by the credential-path rule recognising a filename by accident. Now 10 of 10, with 0 false positives across 15 ordinary file edits including routine `package.json` work, `.env.example`, and documentation that discusses git hooks.
+
+### Added
+- **`RiskRule.params`** matches on a parameter being present at all, for `sandbox_permissions` — dangerous because it was passed, not for its value, which is an ordinary word.
+- **`RiskRule.includeBody`** lets a rule opt into seeing file content. Content is excluded by default because it is data, but npm runs `postinstall` on every install, so that one file's body is executable. The rule pays for the access by being specific enough not to fire on prose about postinstall.
+
+
 
 ### Fixed
 - **The gate caught 1 of 39 realistic destructive commands.** Recall is the ceiling on everything this plugin claims — a command the matcher never flags is one the reviewer never sees — and it had never been measured against anything but the commands the rules were written for. Twenty-two rules added, covering branch and remote-branch deletion, stash and reflog destruction, container volumes, `kubectl delete`, `helm uninstall`, S3 removal, `gh repo delete`, `DROP`/`TRUNCATE`/`FLUSHALL` through a database client, `crontab -r`, firewall flushes, service stops, disk erase, `rsync --delete`, package purge and unpublish, unattended `terraform apply`, `shred`, system-path truncation, and permission stripping. Now 39 of 39, with 0 false positives across 59 ordinary commands.

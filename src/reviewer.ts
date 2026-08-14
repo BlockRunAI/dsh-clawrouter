@@ -19,6 +19,26 @@ export interface RiskRule {
   tools: readonly string[]
   /** Pattern over the tool's rendered arguments. */
   pattern: RegExp
+  /**
+   * Parameter names whose mere presence triggers the rule.
+   *
+   * A value pattern cannot express this: `sandbox_permissions` is dangerous
+   * because it was passed at all, and its values are ordinary words that would
+   * match half a repository if searched for as text.
+   *
+   * When set, {@link pattern} is not consulted.
+   */
+  params?: readonly string[]
+  /**
+   * Match against file bodies as well as the other arguments.
+   *
+   * {@link BODY_FIELDS} is excluded by default because file content is data:
+   * a note about `rm -rf` is not a deletion. A few files are the exception,
+   * because something executes their content later — npm runs `postinstall` on
+   * every install. A rule that needs to see content says so, and pays for the
+   * access by having to be specific enough not to fire on prose.
+   */
+  includeBody?: boolean
 }
 
 /**
@@ -133,6 +153,44 @@ export const DEFAULT_RISK_RULES: readonly RiskRule[] = [
   // `rm` reached through a pipe carries no flags of its own, so the recursive
   // rules above never see it.
   { name: 'pipe-to-delete', tools: [], pattern: /\|\s*(?:sudo\s+)?xargs\s+(?:-\S+\s+)*rm\b/ },
+
+  // --- Files that execute later ----------------------------------------
+  // Everything above assumes a shell command. These do not: the danger is the
+  // PATH being written, because something else runs that file afterwards — on
+  // the next shell, the next commit, the next CI run, the next login. Measured
+  // before these existed: 2 of 10 such writes were flagged, and the two caught
+  // were caught by the credential-path rule by accident of naming.
+  //
+  // Quieter than `rm -rf`, and worse for it: a user watching for destruction
+  // sees nothing happen at all.
+  { name: 'shell-startup-file', tools: [], pattern: /(?:^|[\s'"=:\/])\.(?:bashrc|bash_profile|bash_login|profile|zshrc|zprofile|zshenv|zlogin|kshrc|cshrc|inputrc)\b/ },
+  { name: 'git-hook', tools: [], pattern: /\.git\/hooks\//},
+  { name: 'ci-workflow', tools: [], pattern: /(?:\.github\/workflows\/|\.gitlab-ci\.yml|\.circleci\/|Jenkinsfile|azure-pipelines\.yml|\.travis\.yml)/ },
+  { name: 'login-persistence', tools: [], pattern: /(?:LaunchAgents\/|LaunchDaemons\/|\/etc\/systemd\/|\.config\/systemd\/|\/etc\/rc\.local|\/etc\/cron|\/etc\/init\.d\/)/ },
+  // git reads `core.pager` and aliases as shell, so writing this file is
+  // writing code that runs on the next git command.
+  { name: 'git-config-write', tools: [], pattern: /(?:^|[\s'"=:\/])\.gitconfig\b/ },
+  // `.env.example`, `.env.sample` and friends are committed placeholders that
+  // hold no secrets, and writing one is ordinary setup work.
+  {
+    name: 'env-file-write',
+    tools: ['write', 'edit'],
+    pattern: /(?:^|[\s'"=:\/])\.env(?:\.(?!example|sample|template|dist)\w+)?$/m,
+  },
+
+  // A package manifest is edited constantly, so the path alone is no signal.
+  // The body is: npm runs these hooks on every install, on every machine that
+  // installs the package, which makes writing one a supply-chain action.
+  {
+    name: 'lifecycle-script',
+    tools: ['write', 'edit'],
+    includeBody: true,
+    pattern: /"(?:pre|post)?install"\s*:|"prepare"\s*:|"prepublish(?:Only)?"\s*:/,
+  },
+
+  // --- Asking for more access than the sandbox grants -------------------
+  // Matched by parameter name: it is dangerous because it was passed at all.
+  { name: 'sandbox-escalation', tools: [], pattern: /(?!)/, params: ['sandbox_permissions'] },
 ]
 
 /**
@@ -148,10 +206,17 @@ export function matchRisk(
   rules: readonly RiskRule[] = DEFAULT_RISK_RULES,
 ): RiskMatch | undefined {
   const rendered = renderArguments(args)
-  if (rendered.length === 0) return undefined
+  const withBody = renderArguments(args, true)
+  const present = args !== null && typeof args === 'object' ? Object.keys(args) : []
+  if (rendered.length === 0 && present.length === 0) return undefined
   for (const rule of rules) {
     if (rule.tools.length > 0 && !rule.tools.includes(toolName)) continue
-    const hit = rule.pattern.exec(rendered)
+    if (rule.params !== undefined) {
+      const named = rule.params.find(param => present.includes(param))
+      if (named !== undefined) return { rule: rule.name, evidence: named }
+      continue
+    }
+    const hit = rule.pattern.exec(rule.includeBody === true ? withBody : rendered)
     if (hit === null) continue
     return { rule: rule.name, evidence: truncate(hit[0], 200) }
   }
@@ -229,12 +294,12 @@ const BODY_FIELDS: ReadonlySet<string> = new Set([
  * account for escaping: a command containing `"` reads the same here as it
  * will in the shell.
  */
-function renderArguments(args: unknown): string {
+function renderArguments(args: unknown, includeBody = false): string {
   if (typeof args === 'string') return args
   if (args === null || typeof args !== 'object') return ''
   const parts: string[] = []
   for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
-    if (BODY_FIELDS.has(key)) continue
+    if (BODY_FIELDS.has(key) && !includeBody) continue
     if (typeof value === 'string') parts.push(stripHeredocs(value))
     else if (Array.isArray(value)) parts.push(value.filter(item => typeof item === 'string').join(' '))
   }

@@ -109,12 +109,15 @@ Measured, because this is the question that decides whether you keep it enabled:
 |---|---|
 | Fires on ordinary work | **never** — 0 of 59, including commands that merely *mention* a destructive one (`grep -rn "rm -rf" docs/`, `echo "DROP TABLE" >> notes.md`) |
 | Misses dangerous work | **none** of 39, across git, containers, clusters, cloud storage, databases, and host state |
+| Catches files that execute later | git hooks, CI workflows, shell startup files, launch agents, `.gitconfig`, `.env`, npm `postinstall`, sandbox escalation — 10 of 10, 0 false positives across 15 ordinary file edits |
 | Survives evasion | `\rm -rf /`, `command rm`, `env rm`, `eval "rm -rf $DIR"`, `bash -c "…"`, `\| xargs rm`, and heredocs piped into a shell |
 | Cost when it does fire | **$0.0048** on `claude-opus-5`, $0.002 on cheaper reviewers |
 | Latency when it does fire | ~3s |
 | What the reviewer sees | ~356 tokens — the flagged call, not your conversation |
 
 So during normal work it is invisible: no latency, no cost, no prompts. It bills roughly half a cent on the rare command that deserves a second opinion. Both corpora are tests, so a rule that starts flagging `npm test` — or stops flagging `kubectl delete namespace` — fails CI rather than your session.
+
+Not every dangerous action is a shell command. Writing `.git/hooks/pre-commit`, `.github/workflows/ci.yml`, or an npm `postinstall` runs code later — on the next commit, the next CI run with your secrets, the next `npm install` on someone else's machine. These are quieter than `rm -rf`, and worse for it: a user watching for destruction sees nothing happen at all. Measured before those rules existed, 2 of 10 were flagged.
 
 **Recall is the ceiling on everything above:** a command the matcher never flags is a command the reviewer never sees. An earlier version of this table claimed nothing was missed, measured against the six commands the rules had been written for. Against the 39 above, those same rules caught **one**. The corpus exists so that number can never again be taken on faith.
 
