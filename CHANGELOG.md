@@ -4,6 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.0 — 2026-08-14
+
+### Added
+- **`/spend`** — what this route has cost since the process started: total, per model, token cost and flat fees separately.
+
+  0.2.9 corrected a note claiming spend landed in `~/.blockrun/cost_log.jsonl`; the streaming client this adapter uses never writes there. Rather than wait on the SDK, the figure is computed here from the provider's reported usage and the catalog's published rates — which is the formula BlockRun bills on rather than an approximation of it, because the gateway does not price cache hits differently. That last point is the same finding that makes routing a cache-warm loop through this gateway *more* expensive, used the other way round.
+
+  It counts only calls that completed, so it is a floor and says so; the wallet is the authority. A model the catalog publishes no rate for is reported as unpriced rather than counted as free, because a total that quietly omits calls is worse than one that admits the gap.
+- `requestFeeUsd` (default `0.001`) — the flat per-request fee, configurable because it is a published price rather than a protocol constant, and a stale number here would be a wrong total.
+
 ## 0.2.9 — 2026-08-14
 
 ### Documented

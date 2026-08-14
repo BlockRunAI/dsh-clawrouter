@@ -10,6 +10,10 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
+import Commands from '@deepseek-ai/dsh-commands'
+import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import * as Clawrouter from '../src/index.ts'
 
@@ -28,6 +32,8 @@ async function boot(configLines: readonly string[]): Promise<Context> {
   root = await mkdtemp(join(tmpdir(), 'dsh-clawrouter-adapter-'))
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
+    "- name: '@deepseek-ai/dsh-agent'",
+    "- name: '@deepseek-ai/dsh-commands'",
     "- name: '@deepseek-ai/dsh-llm'",
     "- name: 'dsh-clawrouter'",
     '  config:',
@@ -41,6 +47,8 @@ async function boot(configLines: readonly string[]): Promise<Context> {
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
+    ['@deepseek-ai/dsh-agent', AgentRegistry],
+    ['@deepseek-ai/dsh-commands', Commands],
     ['@deepseek-ai/dsh-llm', LlmRuntime],
     ['dsh-clawrouter', Clawrouter],
   ])
@@ -118,5 +126,44 @@ describe('provider route, booted through the real Loader', () => {
     const entry = ctx.loader.entries().find(e => e.options.name === 'dsh-clawrouter')
     await entry?.fiber?.dispose()
     expect(ctx.llm.listProviders().map(p => p.id)).not.toContain('blockrun')
+  }, 30_000)
+})
+
+/** A registered agent, which command listing is scoped to. */
+function agent(ctx: Context): Agent {
+  const scope = ctx.plugin(() => {})
+  const id = SessionId('clawrouter-spend-agent')
+  const session = Session.create(id)
+  const value: Agent = {
+    id, options: {}, session,
+    inbox: new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} }),
+    status: 'idle', ctx: scope.ctx,
+    followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
+    runMaintenance: task => task(new AbortController().signal),
+    whenIdle: () => Promise.resolve(),
+  }
+  ctx.agents.register(value)
+  return value
+}
+
+describe('/spend in the composed context', () => {
+  it('registers, and reports nothing before any request', async () => {
+    const ctx = await boot(ABSENT)
+    const owner = agent(ctx)
+    expect(ctx.commands.list(owner).map(c => c.name)).toContain('spend')
+
+    const result = await ctx.commands.execute(owner, '/spend', new AbortController().signal)
+    expect(result?.result.kind).toBe('success')
+    // An empty meter says so rather than printing a confident $0 that could be
+    // mistaken for "this route is free".
+    expect(result?.result.kind === 'success' && result.result.text).toMatch(/No BlockRun requests yet/)
+  }, 30_000)
+
+  it('disappears when the fiber is disposed', async () => {
+    const ctx = await boot(ABSENT)
+    const owner = agent(ctx)
+    const entry = ctx.loader.entries().find(e => e.options.name === 'dsh-clawrouter')
+    await entry?.fiber?.dispose()
+    expect(ctx.commands.list(owner).map(c => c.name)).not.toContain('spend')
   }, 30_000)
 })

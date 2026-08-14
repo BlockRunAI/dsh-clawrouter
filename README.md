@@ -99,7 +99,17 @@ Mentioning a command is not running one — `grep -rn "rm -rf" docs/` is not fla
 
 **When the reviewer is unreachable**, the gate escalates to you (`onReviewerFailure: ask`, the default). It never silently allows — a safety gate that fails open is worse than none — and never hard-blocks on a network blip. Unattended automation can set `deny`.
 
-### 2. `/review`
+### 2. `/spend`
+
+```
+/spend
+```
+
+What this route has cost since the process started — total, per model, tokens and flat fees separately.
+
+The figure is computed from the provider's reported usage and the catalog's published rates. That is the formula BlockRun bills on rather than an approximation of it, because the gateway does not price cache hits differently. It counts only calls that completed, so treat it as a **floor**: your wallet balance is the authority. A model the catalog publishes no rate for is reported as unpriced rather than counted as free.
+
+### 3. `/review`
 
 ```
 /review <paste a diff, a plan, or the agent's conclusion>
@@ -107,7 +117,7 @@ Mentioning a command is not running one — `grep -rn "rm -rf" docs/` is not fla
 
 Runs the same strong model over material you choose. For the case one user [reported](https://github.com/deepseek-ai/deepseek-harness/discussions/475): the agent read the right evidence, drew the wrong conclusion, and only a direct challenge surfaced the real bug.
 
-### 3. <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models from one wallet
+### 4. <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models from one wallet
 
 Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account.
 
@@ -133,6 +143,7 @@ $5 of USDC on Base covers thousands of calls. The key is a **reference** in conf
 | `apiUrl` | `https://blockrun.ai/api` | API root |
 | `timeoutMs` | `300000` | per-request timeout |
 | `auxiliaryModel` | *(off)* | model for the harness's own maintenance calls — see below |
+| `requestFeeUsd` | `0.001` | BlockRun's flat per-request fee, used by `/spend` |
 
 ### Cutting compaction cost
 
@@ -182,7 +193,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 161 offline tests, including two real-cordis-Loader compositions
+npm test          # 173 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 

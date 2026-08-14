@@ -14,6 +14,7 @@
 import type { LlmModelInfo, LlmResolvedModelInfo, ModelModality } from '@deepseek-ai/dsh-llm'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import type { BlockrunCatalogModel } from './types.ts'
+import type { ModelRates } from './spend.ts'
 
 /** How long a successful catalog read is reused before the next fetch. */
 export const CATALOG_TTL_MS = 300_000
@@ -50,6 +51,8 @@ const CHAT_CATEGORY = 'chat'
 
 interface CacheEntry {
   models: readonly LlmResolvedModelInfo[]
+  /** Published per-million rates by model id; absent for a model the catalog does not price. */
+  rates: ReadonlyMap<string, ModelRates>
   fetchedAt: number
 }
 
@@ -68,6 +71,11 @@ export class BlockrunCatalog {
     private readonly baseURL: string,
     private readonly now: () => number = Date.now,
   ) {}
+
+  /** Published rates from the last successful read, by model id. */
+  get rates(): ReadonlyMap<string, ModelRates> {
+    return this.#cache?.rates ?? new Map()
+  }
 
   /**
    * All catalog models for this route.
@@ -161,7 +169,7 @@ export class BlockrunCatalog {
     }
     const body: unknown = await response.json()
     const models = projectCatalog(this.provider, body)
-    this.#cache = { models, fetchedAt: this.now() }
+    this.#cache = { models, rates: projectRates(body), fetchedAt: this.now() }
     return models
   }
 }
@@ -221,10 +229,51 @@ function projectModel(provider: string, model: BlockrunCatalogModel): LlmResolve
   }
 }
 
+/** Published per-million rates by model id, for every entry that states one. */
+export function projectRates(body: unknown): ReadonlyMap<string, ModelRates> {
+  const data = (body as { data?: unknown })?.data
+  const entries: unknown[] = Array.isArray(data) ? data : Array.isArray(body) ? body : []
+  const rates = new Map<string, ModelRates>()
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const model = entry as BlockrunCatalogModel
+    if (typeof model.id !== 'string' || model.id.length === 0) continue
+    const input = rate(model.pricing?.input)
+    const output = rate(model.pricing?.output)
+    if (input === undefined && output === undefined) continue
+    rates.set(model.id, {
+      ...input === undefined ? {} : { input },
+      ...output === undefined ? {} : { output },
+    })
+  }
+  return rates
+}
+
+/** A usable non-negative rate; a free model's explicit 0 is kept, nonsense is dropped. */
+function rate(value: number | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
+  return value
+}
+
 /** A finite positive integer, or undefined for anything a capacity cannot be read from. */
 function positive(value: number | undefined): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
   return Math.floor(value)
+}
+
+/**
+ * Published per-million rates for one model, when the catalog states them.
+ *
+ * The harness descriptor has nowhere to carry price, so rates ride beside the
+ * cache rather than inside `LlmResolvedModelInfo`. Reads whatever the last
+ * successful catalog fetch held; a model the catalog does not price answers
+ * undefined rather than zero, so an unpriced call can be reported as unpriced
+ * instead of counted as free.
+ * @param model - BlockRun model id.
+ * @returns its rates, or undefined.
+ */
+export function ratesFor(catalog: BlockrunCatalog, model: string): ModelRates | undefined {
+  return catalog.rates.get(model)
 }
 
 /** Narrow a resolved descriptor to the listing projection. */

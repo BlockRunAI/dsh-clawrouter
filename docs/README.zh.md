@@ -97,7 +97,17 @@ dsh plugin --profile web add dsh-clawrouter
 
 **审查模型不可用时**，默认交给你处理（`onReviewerFailure: ask`）。它绝不会默默放行——失效即放行的安全闸门比没有更糟；也不会因为一次网络抖动就把会话卡死。无人值守的自动化可以改成 `deny`。
 
-### 2. `/review`
+### 2. `/spend`
+
+```
+/spend
+```
+
+本进程启动以来这条路由花了多少钱——总额、分模型、token 成本与固定费用分开列。
+
+这个数字由厂商报告的用量乘以目录公布的价格算出。这不是「估算」，而就是 BlockRun 的计费公式本身——因为网关对缓存命中不另计价。它只统计**成功完成**的调用，所以请把它当作**下限**：钱包余额才是权威。目录没有标价的模型会被标为「未计价」，而不是当成免费。
+
+### 3. `/review`
 
 ```
 /review <粘贴 diff、方案，或者智能体给出的结论>
@@ -105,7 +115,7 @@ dsh plugin --profile web add dsh-clawrouter
 
 用同一个强模型审你指定的内容。有用户[反馈过](https://github.com/deepseek-ai/deepseek-harness/discussions/475)这种情况：智能体其实已经读到了关键证据，却先下了错误结论，直到被人追问才发现真正的 bug。
 
-### 3. 一个钱包，<!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个模型
+### 4. 一个钱包，<!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个模型
 
 注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
 
@@ -131,6 +141,7 @@ Base 链上 5 美元的 USDC 够跑几千次调用。配置里写的是**引用*
 | `apiUrl` | `https://blockrun.ai/api` | API 根地址 |
 | `timeoutMs` | `300000` | 单次请求超时 |
 | `auxiliaryModel` | *(关闭)* | Harness 自身维护调用所用的模型——见下 |
+| `requestFeeUsd` | `0.001` | BlockRun 每次请求的固定费用，`/spend` 会用到 |
 
 ### 把 compaction 的开销降下来
 
@@ -180,7 +191,7 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 ## 开发
 
 ```sh
-npm test          # 161 个离线测试，含两套走真实 cordis Loader 的组合测试
+npm test          # 173 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
 ```
 

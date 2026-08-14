@@ -21,10 +21,16 @@ import { LlmError } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from './adapter.ts'
 import type { BlockrunConnection } from './adapter.ts'
 import { BlockrunCatalog } from './catalog.ts'
+import { renderSpend, SpendMeter } from './spend.ts'
+// Side-effect type import: `ctx.commands` exists only once the commands
+// package has been imported for its declaration merging.
+import type {} from '@deepseek-ai/dsh-commands'
 
 export { BlockrunAdapter } from './adapter.ts'
 export { BlockrunCatalog } from './catalog.ts'
 export { StreamTranslator } from './translate.ts'
+export { renderSpend, SpendMeter, tokenCost } from './spend.ts'
+export type { ModelRates, ModelSpend, SpendSummary } from './spend.ts'
 export type { BlockrunCatalogModel, BlockrunStreamChunk, ReviewVerdict, RiskMatch } from './types.ts'
 
 /** BlockRun's public API root. */
@@ -32,6 +38,9 @@ export const DEFAULT_API_URL = 'https://blockrun.ai/api'
 
 /** Harness route key this plugin registers by default. */
 export const DEFAULT_PROVIDER = 'blockrun'
+
+/** BlockRun's published flat per-request x402 transaction fee. */
+export const DEFAULT_REQUEST_FEE_USD = 0.001
 
 /** Default per-request SDK timeout; long reasoning responses routinely exceed a minute. */
 export const DEFAULT_TIMEOUT_MS = 300_000
@@ -59,6 +68,12 @@ export interface Config {
   /** Per-request SDK timeout in milliseconds. */
   timeoutMs?: number
   /**
+   * Flat per-request fee this deployment is charged, used by `/spend`.
+   * Configurable because it is BlockRun's published price rather than a
+   * protocol constant, and a stale number here is a wrong total.
+   */
+  requestFeeUsd?: number
+  /**
    * Model serving the harness's own maintenance calls — context compaction and
    * session titles — instead of the conversation's model.
    *
@@ -77,6 +92,7 @@ export const Config: z<Config> = z.object({
   walletKeyEnv: z.string().role('credential-ref').default('BASE_CHAIN_WALLET_KEY'),
   apiUrl: z.string().default(DEFAULT_API_URL),
   timeoutMs: z.natural().default(DEFAULT_TIMEOUT_MS),
+  requestFeeUsd: z.number().min(0).default(DEFAULT_REQUEST_FEE_USD),
   auxiliaryModel: z.string(),
 })
 
@@ -122,7 +138,18 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   const catalog = new BlockrunCatalog(provider, `${apiUrl}/v1`)
-  const adapter = new BlockrunAdapter({ provider, connection, resolveWalletKey, catalog })
+  const meter = new SpendMeter(config.requestFeeUsd ?? DEFAULT_REQUEST_FEE_USD)
+  const adapter = new BlockrunAdapter({ provider, connection, resolveWalletKey, catalog, meter })
+
+  // Optional child fiber: a composition with no command surface still routes
+  // requests; it just has nowhere to print this.
+  ctx.inject(['commands'], (commandCtx) => {
+    commandCtx.commands.register({
+      name: 'spend',
+      description: `what the ${provider} route has cost this process`,
+      handler: () => ({ kind: 'success', text: renderSpend(meter.summary()) }),
+    })
+  })
 
   // Registration is an effect: disposing this fiber removes the route, which
   // is what makes hot-reload safe.

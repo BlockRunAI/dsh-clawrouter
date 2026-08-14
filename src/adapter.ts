@@ -31,6 +31,7 @@ import { BlockrunCatalog, toModelInfo } from './catalog.ts'
 import { buildRequestBody } from './serialize.ts'
 import { StreamTranslator } from './translate.ts'
 import type { BlockrunStreamChunk } from './types.ts'
+import type { SpendMeter } from './spend.ts'
 
 /** Path under the API root that serves OpenAI-compatible streaming chat. */
 const CHAT_PATH = '/v1/chat/completions'
@@ -59,6 +60,8 @@ export interface BlockrunAdapterOptions {
   resolveWalletKey: () => Promise<string>
   /** Model catalog for this route. */
   catalog: BlockrunCatalog
+  /** Counts what completed calls cost; omitted leaves spend uncounted. */
+  meter?: SpendMeter
 }
 
 /** Streams harness requests through the BlockRun gateway. */
@@ -155,7 +158,15 @@ export class BlockrunAdapter extends LlmAdapter {
         // Checked again after the await: a turn cancelled while this read was
         // outstanding must not emit the chunk it was waiting on.
         throwIfAborted(options.signal)
-        yield * translator.accept(next.value)
+        const chunks = translator.accept(next.value)
+        for (const chunk of chunks) {
+          // Counted on the provider's own usage record, so a call that never
+          // reported one is never guessed at.
+          if (chunk.type === 'usage') {
+            this.#options.meter?.record(model, chunk.usage, this.#options.catalog.rates.get(model))
+          }
+        }
+        yield * chunks
       }
       yield * translator.end()
     } finally {
