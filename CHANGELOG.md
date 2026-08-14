@@ -4,6 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.2.9 — 2026-08-14
+
+### Documented
+- **Corrected a false claim about spend tracking.** Earlier releases said settled costs land in `~/.blockrun/cost_log.jsonl`. They do not: that ledger is written by `@blockrun/llm`'s `LLMClient`, while the streaming client this adapter uses only accumulates in memory. Checked against a real 5,006-entry ledger — not one entry came from this plugin, so the note was sending people to look at other tools' spending and read it as their own.
+
+  The README now says plainly that this plugin records nothing, and to check the wallet.
+
+### Verified
+- The size-based overflow classification added in 0.2.8 is now proven against the live gateway, not only in unit tests — an oversized prompt to `gpt-4o` surfaces `CONTEXT_WINDOW_EXCEEDED`, paired with an ordinary request on the same model so a mapping that flagged everything would fail too. 0.2.6 passed its unit tests while being inert; this path does not get to claim that twice.
+
 ## 0.2.8 — 2026-08-14
 
 ### Fixed
