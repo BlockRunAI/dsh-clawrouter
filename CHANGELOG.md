@@ -4,6 +4,13 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.10 — 2026-08-14
+
+### Fixed
+- **The READMEs contradicted themselves about pricing.** One section said, correctly since 0.3.2, that this route is priced per request rather than per token. The "Honest notes" section still carried the original 0.1.0 claim — "provider cost plus a flat $0.001/request" — which 0.3.2 disproved. The correction had been applied in one place and not the other, for eleven releases, in the section named for being honest.
+
+  The conclusion was never wrong: do not route a cache-warm loop through this gateway. The reasoning now matches the measurements, and the comparison is starker than the old one — about $0.000056 for a cache-hit turn on DeepSeek directly against roughly $0.007 here at 22K input tokens.
+
 ## 0.3.9 — 2026-08-14
 
 ### Measured

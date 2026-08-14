@@ -212,7 +212,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 
 ## Honest notes
 
-- **This will not make DeepSeek cheaper.** Chat is billed at provider cost plus a flat $0.001/request, and BlockRun does not currently price DeepSeek's cache-hit discount — so routing your main agent loop through it costs *more* than calling DeepSeek directly. Keep your DeepSeek key for the loop. Use this for what DeepSeek cannot do.
+- **This will not make DeepSeek cheaper.** Each request is priced from its own 402 quote — $0.002 at small sizes, climbing with input — and BlockRun does not price DeepSeek's cache-hit discount. A cache-warm agent turn costs DeepSeek about $0.000056 directly against roughly $0.007 here at 22K input tokens. Keep your DeepSeek key for the loop; use this for what DeepSeek cannot do.
 - **The free tier is a smoke test, not a workhorse.** The free NVIDIA models may use prompts for service improvement, so do not point them at a private codebase, and never use one as the reviewer.
 - **A review costs a model call.** It runs only on flagged calls, with a 30s ceiling.
 - **The reviewer sees the flagged tool call**, not your whole repository.
