@@ -4,7 +4,15 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.4.0 — 2026-08-14
+## 0.4.1 — 2026-08-14
+
+### Fixed
+- **npm advertised 70 models while every README said 67.** `package.json`'s description carries the same count on the package page, where an HTML marker cannot go, so filling the markers in 0.3.13 moved the stale copy somewhere less visible rather than removing it. `npm run sync:models` owns that string now and fails loudly if the description stops matching.
+
+### Added
+- **Two gates that make "does the README need updating?" mechanical.** Every command the plugin registers must be documented in both READMEs, read from the source so a new command cannot ship undocumented; and the npm description's model count must equal the READMEs'. Both were fed their bug and rejected it.
+
+
 
 ### Added
 - **`/gate` — check the safety net is actually up.** The gate can be off while everything a user can see looks correct: `enabled` defaults to `false`, a patch layer replaces a row's whole `config` rather than merging keys, and `/review` registers either way — so a working `/review` is evidence the plugin loaded and no evidence at all that tool calls are inspected. `/gate` is registered whether or not the gate is armed, which is the point; a command that appeared only when the gate worked could never report the one state worth asking about.

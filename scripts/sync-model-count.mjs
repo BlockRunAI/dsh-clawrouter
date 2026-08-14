@@ -24,3 +24,16 @@ for (const path of ['README.md', 'docs/README.zh.md']) {
   if (after !== before) writeFileSync(path, after)
   console.log(`${path}: ${sites} marker(s) -> ${count}${after === before ? ' (unchanged)' : ''}`)
 }
+
+// package.json carries the same count in the description npm renders on the
+// package page, where HTML comment markers cannot go. It was missed when the
+// markers were first filled, so npm showed 70 while every README said 67 — the
+// generator has to own every site or it just moves the stale copy somewhere
+// less visible.
+const PACKAGE_COUNT = /(plus )\d+( models from one wallet)/
+const manifestPath = 'package.json'
+const manifest = readFileSync(manifestPath, 'utf8')
+if (!PACKAGE_COUNT.test(manifest)) throw new Error(`${manifestPath} description no longer matches ${PACKAGE_COUNT}`)
+const updated = manifest.replace(PACKAGE_COUNT, `$1${count}$2`)
+if (updated !== manifest) writeFileSync(manifestPath, updated)
+console.log(`${manifestPath}: description -> ${count}${updated === manifest ? ' (unchanged)' : ''}`)

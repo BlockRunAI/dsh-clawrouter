@@ -170,3 +170,34 @@ describe('the generated model count is actually generated', () => {
     expect(counts[0]).toBeGreaterThan(0)
   })
 })
+
+describe('every command and every count is documented', () => {
+  // "Does the README need updating?" should not be a judgement call. Both
+  // halves of it are mechanical: a command users can type must be documented,
+  // and a count that appears in more than one file must agree everywhere.
+
+  it('both READMEs document every command the plugin registers', () => {
+    // Read from the source rather than a list kept alongside it, so a command
+    // added without documentation fails here instead of shipping undocumented.
+    const registered = [...readFileSync('src/review.ts', 'utf8'), ...readFileSync('src/index.ts', 'utf8')]
+      .join('')
+      .matchAll(/commands\.register\(\{\s*\n\s*name: '([a-z-]+)'/g)
+    const names = [...registered].map(match => match[1]!)
+    expect(names.length, 'no registered commands found; the matcher has drifted').toBeGreaterThan(0)
+    for (const name of names) {
+      expect(EN, `English README does not document /${name}`).toContain(`/${name}`)
+      expect(ZH, `Chinese README does not document /${name}`).toContain(`/${name}`)
+    }
+  })
+
+  it('the npm description carries the same model count as the READMEs', () => {
+    // npm renders this on the package page, where the HTML markers cannot go.
+    // It was missed when the markers were filled, so npm advertised 70 while
+    // every README said 67.
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as { description: string }
+    const advertised = Number(manifest.description.match(/plus (\d+) models/)?.[1])
+    const documented = Number(EN.match(/<!-- br:models\.chatVisible -->(\d+)</)?.[1])
+    expect(advertised, 'package.json description no longer states a model count').toBeGreaterThan(0)
+    expect(advertised, 'run `npm run sync:models`').toBe(documented)
+  })
+})
