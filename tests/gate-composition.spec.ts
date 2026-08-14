@@ -56,6 +56,22 @@ class StubAdapter extends LlmAdapter {
 
 /** Mounts the stub reviewer route and a `bash` tool that records whether it ran. */
 const ran: string[] = []
+
+/** Set when a test wants a stricter policy listener sitting after the gate. */
+let downstreamDenies = false
+const DOWNSTREAM_REASON = 'denied by the deployment policy'
+
+/** A policy listener mounted AFTER the gate, so the gate must delegate to reach it. */
+const Downstream = {
+  name: 'clawrouter-test-downstream',
+  inject: ['tools'],
+  apply(ctx: Context) {
+    ctx.on('tools/pre-execute', async (_exec, next) => {
+      if (downstreamDenies) return { kind: 'deny' as const, reason: DOWNSTREAM_REASON }
+      return next()
+    })
+  },
+}
 const Fixture = {
   name: 'clawrouter-test-fixture',
   inject: ['llm', 'tools'],
@@ -116,6 +132,7 @@ async function boot(configLines: readonly string[], withCommands = true): Promis
     "- name: 'dsh-clawrouter/review'",
     '  config:',
     ...configLines,
+    "- name: 'clawrouter-test-downstream'",
     '',
   ].join('\n'))
 
@@ -132,6 +149,7 @@ async function boot(configLines: readonly string[], withCommands = true): Promis
     ['@deepseek-ai/dsh-commands', Commands],
     ['clawrouter-test-fixture', Fixture],
     ['dsh-clawrouter/review', Review],
+    ['clawrouter-test-downstream', Downstream],
   ])
   ctx.loader.internal = {
     version: 'v2',
@@ -263,5 +281,55 @@ describe('review gate, booted through the real Loader', () => {
     const result = await callBash(ctx, 'rm -rf ~')
     expect(result.isError).toBe(false)
     expect(ran).toEqual(['rm -rf ~'])
+  }, 30_000)
+})
+
+describe('the gate only ever narrows', () => {
+  it('defers to a stricter listener instead of escalating past it', async () => {
+    // Reviewer is unsure, so the gate would escalate to a human. But a policy
+    // listener AFTER it denies outright. Returning `ask` here would skip that
+    // listener entirely, and a human clicking Allow would run a call the
+    // deployment had already refused.
+    behavior = { kind: 'reply', text: '{"ruling":"uncertain","reason":"cannot tell from here"}' }
+    downstreamDenies = true
+    ran.length = 0
+    const ctx = await boot(ENABLED)
+
+    const result = await callBash(ctx, 'rm -rf ~')
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain(DOWNSTREAM_REASON)
+    expect(ran).toEqual([])
+    downstreamDenies = false
+  }, 30_000)
+
+  it('still escalates when the rest of the chain would have allowed', async () => {
+    behavior = { kind: 'reply', text: '{"ruling":"uncertain","reason":"cannot tell from here"}' }
+    downstreamDenies = false
+    ran.length = 0
+    const ctx = await boot(ENABLED)
+
+    const result = await callBash(ctx, 'rm -rf ~')
+
+    // No approval service is composed, so an escalation resolves to a denial —
+    // what matters is that the command did not run and the reason is the
+    // reviewer's, not a downstream listener's.
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('cannot tell from here')
+    expect(ran).toEqual([])
+  }, 30_000)
+
+  it('lets a stricter listener win even on a reviewed-safe call', async () => {
+    behavior = { kind: 'reply', text: '{"ruling":"safe","reason":"looks fine"}' }
+    downstreamDenies = true
+    ran.length = 0
+    const ctx = await boot(ENABLED)
+
+    const result = await callBash(ctx, 'rm -rf ./dist')
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain(DOWNSTREAM_REASON)
+    expect(ran).toEqual([])
+    downstreamDenies = false
   }, 30_000)
 })

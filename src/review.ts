@@ -187,11 +187,22 @@ export function apply(ctx: Context, config: Config): void {
         // Cleared, not approved: the call still faces the rest of the chain.
         return next()
       case 'dangerous':
+        // Denying without delegating is safe in the one direction that
+        // matters: nothing later in the chain could have been stricter.
         return { kind: 'deny', reason: `${verdict.reason} (safety review: ${match.rule})` }
-      case 'uncertain':
-        return onFailure === 'deny'
-          ? { kind: 'deny', reason: `${verdict.reason} (safety review: ${match.rule})` }
-          : { kind: 'ask', reason: `${verdict.reason} (safety review: ${match.rule})` }
+      case 'uncertain': {
+        const reason = `${verdict.reason} (safety review: ${match.rule})`
+        if (onFailure === 'deny') return { kind: 'deny', reason }
+        // Escalating REPLACES the rest of the chain, because a waterfall
+        // listener that returns without delegating short-circuits it. So the
+        // downstream decision is taken first: an escalation is only ever added
+        // on top of a call the remaining policy would have allowed. Otherwise
+        // a human clicking Allow could run something a stricter listener had
+        // already refused — this gate widening the very policy it sits in
+        // front of.
+        const downstream = await next()
+        return downstream.kind === 'allow' ? { kind: 'ask', reason } : downstream
+      }
     }
   })
 

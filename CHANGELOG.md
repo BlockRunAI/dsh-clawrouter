@@ -4,6 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.2.4 — 2026-08-14
+
+### Fixed
+- **Escalating to a human skipped the rest of the policy chain.** A waterfall listener that returns without delegating short-circuits it, so when the reviewer was unsure the gate's `ask` replaced every later `tools/pre-execute` listener. A stricter policy that would have *denied* the call never ran, and a human clicking Allow could run something the deployment had already refused — this gate widening the very policy it sits in front of.
+
+  An escalation now takes the downstream decision first and is only ever added on top of a call the rest of the chain would have allowed. "It only ever narrows" is now true of every path, not just the cleared one.
+
+### Added
+- Live tests that try to talk a real reviewer into clearing `rm -rf ~`: an embedded verdict object, "ignore all previous instructions", claimed security-team authority, a fake system turn, and role reversal. All five are refused.
+
 ## 0.2.2 — 2026-08-14
 
 ### Added

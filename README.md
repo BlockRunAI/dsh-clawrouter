@@ -76,7 +76,7 @@ When the agent proposes something destructive, a strong model (default `anthropi
 | dangerous | **denied**, with a reason the agent can act on |
 | uncertain | **escalated to you** — the normal approval prompt |
 
-It only ever *narrows*. A call the reviewer clears still faces every sandbox, permission, and approval gate you already have. This does not replace your permission system; it sits in front of it.
+It only ever *narrows*. A call the reviewer clears still faces every sandbox, permission, and approval gate you already have — and an escalation defers to them too: if a stricter policy would have denied the call, you get that denial rather than an approval prompt. This does not replace your permission system; it sits in front of it.
 
 Enable it in your profile's `cordis.patch.yml`:
 
@@ -180,7 +180,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 146 offline tests, including two real-cordis-Loader compositions
+npm test          # 149 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 
