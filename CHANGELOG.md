@@ -4,6 +4,13 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.4 — 2026-08-14
+
+### Fixed
+- **The cost warning added in 0.3.3 quoted one model's prices as if they were everyone's.** Measuring the same prompt across four models at ~112K input tokens: `openai/gpt-4.1-nano` quotes $0.023, `deepseek/deepseek-chat` $0.031, `google/gemini-3.5-flash` $0.325, and `anthropic/claude-opus-5` **$1.081**.
+
+  All four start at the same $0.002 floor and then diverge more than thirty-fold. 0.3.3 printed the DeepSeek figures with no model named, so an Opus user read a number 35x under their real charge — while being warned about *under*-reporting. The warning now gives the spread and points at your own model's rate instead of one number.
+
 ## 0.3.3 — 2026-08-14
 
 ### Fixed

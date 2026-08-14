@@ -111,16 +111,16 @@ What this route has cost since the process started — total, per model, tokens 
 
 So `/spend` reports `calls x price` and carries token counts as counts, never converting them into money. Pricing that 8,000-token call from its tokens gave $0.004243, more than double the real charge.
 
-The request price is flat up to about a thousand input tokens, then climbs with context. Measured from the gateway's own 402 quotes on `deepseek/deepseek-chat`:
+The request price is flat up to about a thousand input tokens, then climbs with **both context and the model**. Measured from the gateway's own 402 quotes (reading a quote costs nothing):
 
-| Input | Quote |
-|---|---|
-| up to ~1K tokens | $0.002 |
-| ~22K tokens | $0.007 |
-| ~112K tokens | $0.031 |
-| ~450K tokens | $0.122 |
+| Model | small | ~22K in | ~112K in |
+|---|---|---|---|
+| `openai/gpt-4.1-nano` | $0.002 | $0.005 | $0.023 |
+| `deepseek/deepseek-chat` | $0.002 | $0.007 | $0.031 |
+| `google/gemini-3.5-flash` | $0.002 | $0.066 | $0.325 |
+| `anthropic/claude-opus-5` | $0.002 | $0.217 | **$1.081** |
 
-So a coding agent working in a 100K-token context pays roughly **fifteen times** the floor per call. `/spend` says this out loud whenever your average call carries a large context, rather than leaving a confident small number on screen. It is also blind to a request that failed after paying. Your wallet balance is the authority.
+Everything starts at the same $0.002 and then diverges by more than thirty-fold. A coding agent holding a 100K-token context pays roughly fifteen times the floor per call on DeepSeek — and **five hundred times** on Opus. `/spend` says so whenever your average call carries a large context, and points you at your own model's rate rather than one number. It is also blind to a request that failed after paying. Your wallet balance is the authority.
 
 The default `requestFeeUsd` is `0.002` because that is what the gateway quotes: a 402 for a ~17-token request returns `{"amount":"0.002000"}`. BlockRun's published pricing page currently says $0.001.
 

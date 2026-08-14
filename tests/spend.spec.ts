@@ -92,7 +92,11 @@ describe('the floor stops being honest as context grows', () => {
     const text = renderSpend(meter.summary())
     expect(text).toMatch(/FLOOR AND LIKELY WELL UNDER/)
     expect(text).toMatch(/112,000 input tokens per call/)
-    expect(text).toMatch(/\$0\.031 at 112K/)
+    // The spread is the point, not any one figure: at this size the same
+    // prompt quotes $0.02 on gpt-4.1-nano and $1.08 on claude-opus-5, so a
+    // single unattributed number is wrong for almost everyone reading it.
+    expect(text).toMatch(/claude-opus-5/)
+    expect(text).toMatch(/read your own model's rate/)
   })
 
   it('stays quiet for small calls, where the floor is exact', () => {

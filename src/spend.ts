@@ -137,7 +137,9 @@ export function renderSpend(summary: SpendSummary): string {
     // order of magnitude.
     lines.push(
       `THIS TOTAL IS A FLOOR AND LIKELY WELL UNDER THE REAL CHARGE: averaging ${Math.round(averageInput).toLocaleString()} input tokens per call, `
-      + 'and the request price climbs with context — roughly $0.007 at 22K input tokens, $0.031 at 112K, $0.122 at 450K.',
+      + 'and the request price climbs with both context and the model. Measured at ~112K input tokens, one call quotes about '
+      + '$0.02 on gpt-4.1-nano, $0.03 on deepseek-chat, $0.33 on gemini-3.5-flash and $1.08 on claude-opus-5 — so read your own '
+      + "model's rate rather than any single number here.",
     )
   }
   lines.push('Only completed calls are counted. Your wallet balance is the authority.')
