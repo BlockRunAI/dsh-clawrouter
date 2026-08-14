@@ -81,3 +81,35 @@ describe('projectRates', () => {
     expect(rates.has('bad/model')).toBe(false)
   })
 })
+
+describe('the floor stops being honest as context grows', () => {
+  it('says so when calls carry a large context', () => {
+    const meter = new SpendMeter(0.002)
+    // A coding agent's working context. The 402 quote at this size is ~$0.031,
+    // fifteen times the floor — so a bare "$0.002" on screen would be the
+    // misleading part, not the helpful one.
+    meter.record('deepseek/deepseek-chat', usage(112_000, 200))
+    const text = renderSpend(meter.summary())
+    expect(text).toMatch(/FLOOR AND LIKELY WELL UNDER/)
+    expect(text).toMatch(/112,000 input tokens per call/)
+    expect(text).toMatch(/\$0\.031 at 112K/)
+  })
+
+  it('stays quiet for small calls, where the floor is exact', () => {
+    const meter = new SpendMeter(0.002)
+    // Measured: three calls this size moved a wallet by exactly $0.006.
+    meter.record('deepseek/deepseek-chat', usage(17, 3))
+    const text = renderSpend(meter.summary())
+    expect(text).not.toMatch(/FLOOR AND LIKELY WELL UNDER/)
+    expect(text).toMatch(/wallet balance is the authority/)
+  })
+
+  it('warns on the average, not on one big call among many', () => {
+    const meter = new SpendMeter(0.002)
+    meter.record('m', usage(112_000, 10))
+    for (let i = 0; i < 400; i++) meter.record('m', usage(20, 10))
+    // Average input is ~300 tokens, so the floor is still broadly right and
+    // the warning would be noise.
+    expect(renderSpend(meter.summary())).not.toMatch(/FLOOR AND LIKELY WELL UNDER/)
+  })
+})

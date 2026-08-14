@@ -50,6 +50,9 @@ export interface ModelSpend {
   costUsd: number
 }
 
+/** Input size past which the per-request floor stops resembling the real charge. */
+export const FLOOR_RELIABLE_INPUT_TOKENS = 1_000
+
 /** Everything the meter knows. */
 export interface SpendSummary {
   calls: number
@@ -123,9 +126,20 @@ export function renderSpend(summary: SpendSummary): string {
   for (const entry of summary.byModel) {
     lines.push(`  ${entry.model}  ${usd(entry.costUsd)}  ${entry.calls} call${entry.calls === 1 ? '' : 's'}`)
   }
+  const averageInput = summary.calls === 0 ? 0 : summary.inputTokens / summary.calls
   lines.push(
     '',
-    'Priced per request, not per token: measured against the wallet, a call generating 8,000 tokens cost the same as one generating 3. Exact for ordinary calls, a floor for very large inputs, and blind to a request that failed after paying. Your wallet balance is the authority.',
+    'Priced per request, not per token: measured against the wallet, a call generating 8,000 output tokens cost the same as one generating 3.',
   )
+  if (averageInput > FLOOR_RELIABLE_INPUT_TOKENS) {
+    // Silence here would be the misleading part. The quote climbs with input,
+    // so on a long context this total is not slightly low, it is a different
+    // order of magnitude.
+    lines.push(
+      `THIS TOTAL IS A FLOOR AND LIKELY WELL UNDER THE REAL CHARGE: averaging ${Math.round(averageInput).toLocaleString()} input tokens per call, `
+      + 'and the request price climbs with context — roughly $0.007 at 22K input tokens, $0.031 at 112K, $0.122 at 450K.',
+    )
+  }
+  lines.push('Only completed calls are counted. Your wallet balance is the authority.')
   return lines.join('\n')
 }

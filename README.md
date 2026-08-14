@@ -111,7 +111,16 @@ What this route has cost since the process started — total, per model, tokens 
 
 So `/spend` reports `calls x price` and carries token counts as counts, never converting them into money. Pricing that 8,000-token call from its tokens gave $0.004243, more than double the real charge.
 
-The figure is exact for ordinary calls, a **floor** for very large inputs (whose quote is higher than the per-request price), and blind to a request that failed after paying. Your wallet balance is the authority.
+The request price is flat up to about a thousand input tokens, then climbs with context. Measured from the gateway's own 402 quotes on `deepseek/deepseek-chat`:
+
+| Input | Quote |
+|---|---|
+| up to ~1K tokens | $0.002 |
+| ~22K tokens | $0.007 |
+| ~112K tokens | $0.031 |
+| ~450K tokens | $0.122 |
+
+So a coding agent working in a 100K-token context pays roughly **fifteen times** the floor per call. `/spend` says this out loud whenever your average call carries a large context, rather than leaving a confident small number on screen. It is also blind to a request that failed after paying. Your wallet balance is the authority.
 
 The default `requestFeeUsd` is `0.002` because that is what the gateway quotes: a 402 for a ~17-token request returns `{"amount":"0.002000"}`. BlockRun's published pricing page currently says $0.001.
 
@@ -199,7 +208,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 172 offline tests, including two real-cordis-Loader compositions
+npm test          # 175 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 

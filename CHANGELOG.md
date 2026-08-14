@@ -4,6 +4,15 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.3 — 2026-08-14
+
+### Fixed
+- **`/spend` understated long-context work by roughly fifteen times, silently.** 0.3.2 established that settlement is per request rather than per token, and called the total a floor. Measuring the gateway's 402 quotes — which cost nothing, since a quote is not a payment — showed how far under that floor sits once context grows: flat at $0.002 up to ~1K input tokens, then $0.007 at ~22K, $0.031 at ~112K, $0.122 at ~450K.
+
+  A coding agent working in a 100K-token context is the whole point of this plugin, and it pays about fifteen times the floor per call. The total now says so whenever the average call carries a large context, with the measured figures, instead of leaving a confident small number on screen.
+
+  The warning keys on the average rather than any single call, so one large call among hundreds of small ones stays quiet.
+
 ## 0.3.2 — 2026-08-14
 
 ### Fixed
