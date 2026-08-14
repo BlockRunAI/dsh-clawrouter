@@ -4,7 +4,19 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.3.12 — 2026-08-14
+## 0.3.13 — 2026-08-14
+
+### Fixed
+- **The model count said 70; the catalog exposes 67.** Eight sites across both READMEs carried `<!-- br:models.chatVisible -->` markers — the notation for generated content — but the script that fills them was never written, so the number froze at whatever was true the day it was typed.
+
+### Added
+- **`npm run sync:models`** rewrites every marker from the live catalog, counting through `projectCatalog` so the figure is what this route exposes rather than what the gateway lists. It refuses to write `0`.
+- **Two gates, split by what each can know.** An offline test asserts every marker agrees with the others, catching a hand-edit of one site; a live e2e test asserts the count matches the gateway and names `sync:models` in its failure message. Both were fed their bug and rejected it.
+
+### Changed
+- `tsx` is a devDependency, so a maintenance script can import the plugin's own catalog projection instead of restating the filter in JavaScript.
+
+
 
 ### Fixed
 - **"$5 covers thousands of calls" quoted only the flattering end of a range this document measures.** True at the $0.002 floor, where $5 buys about 2,500 gate reviews. At the other end of the same table it buys about five 100K-context calls on Opus — a 500x spread, given as one number, in the paragraph where a reader decides how much to fund. Both figures are stated now, with the advice to fund for intended use rather than for the floor.

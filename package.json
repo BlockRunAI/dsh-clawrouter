@@ -1,6 +1,6 @@
 {
   "name": "dsh-clawrouter",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "description": "A second brain for your DeepSeek Harness agent \u2014 strong-model review before risky tool calls, plus 70 models from one wallet. No accounts, no API keys.",
   "type": "module",
   "main": "lib/index.js",
@@ -45,6 +45,7 @@
   "scripts": {
     "build": "tsup",
     "prepare": "tsup",
+    "sync:models": "tsx scripts/sync-model-count.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
@@ -74,6 +75,7 @@
     "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
     "tsup": "^8.5.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },

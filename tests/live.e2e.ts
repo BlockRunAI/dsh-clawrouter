@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from '../src/adapter.ts'
-import { BlockrunCatalog } from '../src/catalog.ts'
+import { BlockrunCatalog, projectCatalog } from '../src/catalog.ts'
 import { buildReviewPrompt, matchRisk, parseVerdict, REVIEW_SYSTEM_PROMPT } from '../src/reviewer.ts'
 
 const API_URL = 'https://blockrun.ai/api'
@@ -275,4 +275,20 @@ live('an unfunded wallet, against the real gateway', () => {
     // is the one fact they cannot work out from what they configured.
     expect(failure.message).toMatch(/Send USDC on Base to 0x[0-9a-fA-F]{40}/)
   }, 180_000)
+})
+
+describe('the README model count matches the live catalog', () => {
+  // The offline gate in tests/docs.spec.ts proves the markers agree with each
+  // other; only the gateway can say whether they are right. Run
+  // `npm run sync:models` when this fails — the catalog moves.
+  it('counts what projectCatalog exposes today', async () => {
+    const response = await fetch(`${API_URL}/v1/models`)
+    expect(response.ok).toBe(true)
+    const live = projectCatalog('blockrun', await response.json()).length
+    const claimed = Number(
+      readFileSync('README.md', 'utf8').match(/<!-- br:models\.chatVisible -->(\d+)</)?.[1],
+    )
+    expect(live, 'catalog returned nothing usable').toBeGreaterThan(0)
+    expect(claimed, `README says ${claimed}, catalog exposes ${live}; run \`npm run sync:models\``).toBe(live)
+  })
 })

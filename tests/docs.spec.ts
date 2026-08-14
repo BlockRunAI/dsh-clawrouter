@@ -152,3 +152,21 @@ describe('the funding advice is arithmetic, not a slogan', () => {
     expect(atContext! * opusAt112k).toBeLessThan(FUNDING_USD * 1.3)
   })
 })
+
+describe('the generated model count is actually generated', () => {
+  // The `br:models.chatVisible` markers were introduced without the script that
+  // fills them, so eight sites sat at 70 while the catalog moved to 67. A
+  // number wearing generated-content markers is worse than a bare one: it
+  // announces that something maintains it, so nobody checks.
+  //
+  // `npm run sync:models` fills them now. This checks the offline half — that
+  // the sites agree — and tests/live.e2e.ts checks them against the gateway.
+  const MARKER = /<!-- br:models\.chatVisible -->(\d+)<!-- \/br:models\.chatVisible -->/g
+
+  it('every marker in both READMEs carries the same count', () => {
+    const counts = [EN, ZH].flatMap(doc => [...doc.matchAll(MARKER)].map(match => Number(match[1])))
+    expect(counts.length, 'no model-count markers found').toBeGreaterThan(1)
+    expect(new Set(counts), `markers disagree: ${[...new Set(counts)].join(', ')}`).toHaveProperty('size', 1)
+    expect(counts[0]).toBeGreaterThan(0)
+  })
+})
