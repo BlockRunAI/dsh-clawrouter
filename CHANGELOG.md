@@ -4,6 +4,14 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.7 — 2026-08-14
+
+### Added
+- **Unknown model ids now suggest what you meant.** With seventy slash-prefixed ids, a wrong name is nearly always a near miss, and the previous error just restated the failure. Verified against the live catalog: `deepseek-chat` suggests `deepseek/deepseek-chat` (dropped vendor prefix), `anthropic/claude-opus5` suggests `anthropic/claude-opus-5` (missing hyphen), `deepseek/deepseek-v4` suggests `deepseek/deepseek-v4-pro` (truncated suffix). A name unrelated to anything in the catalog suggests nothing rather than the nearest noise, and every message now links the model list.
+
+### Documented
+- Developing against a **linked checkout** pulls this package's devDependencies into the profile, giving a second copy of `@deepseek-ai/dsh-llm`. `instanceof LlmError` fails across the two copies, so the harness reports every failure as `UNKNOWN` rather than its real code. That looks exactly like a product bug — it cost an investigation here — and disappears when installed from a tarball or npm.
+
 ## 0.3.6 — 2026-08-14
 
 ### Fixed

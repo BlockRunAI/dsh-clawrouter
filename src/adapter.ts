@@ -27,7 +27,7 @@ import type {
   LlmResolvedModelInfo,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
-import { BlockrunCatalog, toModelInfo } from './catalog.ts'
+import { BlockrunCatalog, suggestModels, toModelInfo } from './catalog.ts'
 import { buildRequestBody } from './serialize.ts'
 import { StreamTranslator } from './translate.ts'
 import type { BlockrunStreamChunk } from './types.ts'
@@ -234,8 +234,13 @@ export class BlockrunAdapter extends LlmAdapter {
       return
     }
     if (known.length === 0 || known.some(entry => entry.id === model)) return
+    // Thrown here rather than delegated to the catalog: this is the
+    // pre-dispatch check, and raising its own error keeps the failure code
+    // fixed at UNKNOWN_MODEL regardless of which path the harness happened to
+    // reach first. Delegating made the code vary.
     throw new LlmError(
-      `BlockRun does not serve model "${model}"; call listModels() for the current catalog`,
+      `BlockRun does not serve model "${model}" on provider route "${this.#options.provider}".`
+      + suggestionSuffix(model, known.map(entry => entry.id)),
       'UNKNOWN_MODEL',
     )
   }
@@ -264,6 +269,21 @@ export function auxiliaryModelFor(
   if (options.purpose === undefined) return options.model
   const auxiliary = connection.auxiliaryModel
   return auxiliary !== undefined && auxiliary.length > 0 ? auxiliary : options.model
+}
+
+/**
+ * The "did you mean" tail of an unknown-model diagnostic.
+ *
+ * With seventy slash-prefixed ids a wrong name is almost always a near miss —
+ * a dropped `vendor/` prefix, a missing hyphen — so the useful answer is the
+ * name they meant, not the fact that they were wrong.
+ * @param model - the id that was not found.
+ * @param known - every id this route serves.
+ * @returns a sentence to append, or an empty string when nothing is close.
+ */
+function suggestionSuffix(model: string, known: readonly string[]): string {
+  const suggestions = suggestModels(model, known)
+  return suggestions.length > 0 ? ` Did you mean ${suggestions.map(id => `"${id}"`).join(', ')}?` : ''
 }
 
 /** Raise the caller's abort as the harness's terminal abort, before any chunk is emitted. */

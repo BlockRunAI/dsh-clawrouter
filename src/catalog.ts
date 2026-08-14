@@ -140,8 +140,15 @@ export class BlockrunCatalog {
     const models = await this.list(signal)
     const found = models.find(entry => entry.id === model)
     if (found === undefined) {
+      // With seventy slash-prefixed ids, a wrong name is almost always a near
+      // miss — a dropped `vendor/` prefix, a missing hyphen, a stale suffix —
+      // so the useful answer is the name they meant, not the fact they were
+      // wrong.
+      const suggestions = suggestModels(model, models.map(entry => entry.id))
       throw new LlmError(
-        `BlockRun does not serve model "${model}" on provider route "${this.provider}"`,
+        `BlockRun does not serve model "${model}" on provider route "${this.provider}".`
+        + (suggestions.length > 0 ? ` Did you mean ${suggestions.map(id => `"${id}"`).join(', ')}?` : '')
+        + ` The full list is at ${this.baseURL.replace(/\/$/, '')}/models.`,
         'UNKNOWN_MODEL',
       )
     }
@@ -227,6 +234,67 @@ function projectModel(provider: string, model: BlockrunCatalogModel): LlmResolve
     },
     defaultMaxTokens: positive(model.max_output) ?? DEFAULT_MAX_TOKENS,
   }
+}
+
+/** Comparison form: case and punctuation carry no meaning across model ids. */
+function normalize(id: string): string {
+  return id.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * The catalog ids a mistyped one most likely meant.
+ *
+ * Containment first, because the two most common mistakes are structural
+ * rather than typographic: dropping the `vendor/` prefix (`deepseek-chat`) and
+ * truncating a suffix (`deepseek/deepseek-v4`). Edit distance then catches the
+ * genuine typos — a missing hyphen in `claude-opus5`, a transposition — and is
+ * bounded so that a wholly unrelated string suggests nothing at all rather
+ * than the alphabetically nearest noise.
+ * @param model - the id that was not found.
+ * @param known - every id the catalog serves.
+ * @param limit - most suggestions to return.
+ * @returns the closest ids, best first.
+ */
+export function suggestModels(model: string, known: readonly string[], limit = 3): string[] {
+  const wanted = normalize(model)
+  if (wanted.length === 0) return []
+  const scored: { id: string; score: number }[] = []
+  for (const id of known) {
+    const candidate = normalize(id)
+    if (candidate === wanted) return [id]
+    if (candidate.endsWith(wanted) || candidate.startsWith(wanted)) {
+      scored.push({ id, score: 1 })
+      continue
+    }
+    if (candidate.includes(wanted) || wanted.includes(candidate)) {
+      scored.push({ id, score: 2 })
+      continue
+    }
+    const distance = editDistance(wanted, candidate)
+    // A third of the length is loose enough for a dropped hyphen and tight
+    // enough that an unrelated name proposes nothing.
+    if (distance <= Math.max(1, Math.floor(Math.max(wanted.length, candidate.length) / 3))) {
+      scored.push({ id, score: 3 + distance })
+    }
+  }
+  return scored.sort((left, right) => left.score - right.score || left.id.localeCompare(right.id))
+    .slice(0, limit)
+    .map(entry => entry.id)
+}
+
+/** Levenshtein distance, iterative single-row. */
+function editDistance(left: string, right: string): number {
+  if (left === right) return 0
+  let previous = Array.from({ length: right.length + 1 }, (_unused, index) => index)
+  for (let i = 1; i <= left.length; i++) {
+    const current = [i]
+    for (let j = 1; j <= right.length; j++) {
+      const substitution = previous[j - 1]! + (left[i - 1] === right[j - 1] ? 0 : 1)
+      current[j] = Math.min(current[j - 1]! + 1, previous[j]! + 1, substitution)
+    }
+    previous = current
+  }
+  return previous[right.length]!
 }
 
 /** Published per-million rates by model id, for every entry that states one. */

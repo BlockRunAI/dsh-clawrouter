@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS, projectCatalog } from '../src/catalog.ts'
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS, projectCatalog, suggestModels } from '../src/catalog.ts'
 
 /** An entry in the exact shape `GET /api/v1/models` really returns. */
 const deepseekChat = {
@@ -91,5 +91,36 @@ describe('projectCatalog', () => {
     const [model] = projectCatalog('blockrun', { data: [{ id: 'x', context_window: -5, max_output: 0 }] })
     expect(model?.context?.contextWindow).toBe(DEFAULT_CONTEXT_WINDOW)
     expect(model?.defaultMaxTokens).toBe(DEFAULT_MAX_TOKENS)
+  })
+})
+
+describe('suggestModels', () => {
+  const KNOWN = [
+    'deepseek/deepseek-chat', 'deepseek/deepseek-v4-pro', 'deepseek/deepseek-reasoner',
+    'anthropic/claude-opus-5', 'anthropic/claude-sonnet-4.6',
+    'openai/gpt-4.1-nano', 'google/gemini-3.5-flash',
+  ]
+
+  it.each([
+    // The three mistakes a real run produced, in order of how likely they are.
+    ['deepseek-chat', 'deepseek/deepseek-chat'],            // dropped the vendor prefix
+    ['anthropic/claude-opus5', 'anthropic/claude-opus-5'],  // missing hyphen
+    ['deepseek/deepseek-v4', 'deepseek/deepseek-v4-pro'],   // truncated suffix
+  ])('suggests %j -> %j', (typo, expected) => {
+    expect(suggestModels(typo, KNOWN)[0]).toBe(expected)
+  })
+
+  it('returns the exact id alone when it is a case or punctuation variant', () => {
+    expect(suggestModels('DeepSeek/DeepSeek-Chat', KNOWN)).toEqual(['deepseek/deepseek-chat'])
+  })
+
+  it('suggests nothing for a name with no relation to the catalog', () => {
+    // Proposing the alphabetically nearest noise would be worse than silence.
+    expect(suggestModels('llama-3-70b-instruct', KNOWN)).toEqual([])
+    expect(suggestModels('', KNOWN)).toEqual([])
+  })
+
+  it('bounds how many it offers', () => {
+    expect(suggestModels('deepseek', KNOWN).length).toBeLessThanOrEqual(3)
   })
 })

@@ -213,9 +213,11 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 ## 开发
 
 ```sh
-npm test          # 175 个离线测试，含两套走真实 cordis Loader 的组合测试
+npm test          # 181 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
 ```
+
+用**本地 link** 开发时（`dsh plugin add /path/to/dsh-clawrouter`），本包的 **devDependencies** 会被带进 profile，于是出现两份 `@deepseek-ai/dsh-llm`。跨这两份做 `instanceof LlmError` 会失败，harness 就会把所有失败都显示成 `UNKNOWN`，而不是真实错误码。要验证错误码，请用 `npm pack` 出来的 tarball 安装，而不是 link。
 
 只有这套 live 测试会真正走一遍 x402 握手：签名本身就是认证，任何 mock 都替代不了。它被刻意排除在 `npm test` 之外，不会被误跑。
 

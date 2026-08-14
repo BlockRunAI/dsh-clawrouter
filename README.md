@@ -215,9 +215,11 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 175 offline tests, including two real-cordis-Loader compositions
+npm test          # 181 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
+
+Developing against a linked checkout (`dsh plugin add /path/to/dsh-clawrouter`) pulls this package's **devDependencies** into the profile, giving a second copy of `@deepseek-ai/dsh-llm`. `instanceof LlmError` then fails across the two copies and the harness reports every failure as `UNKNOWN` instead of its real code. Test error codes from a packed tarball (`npm pack`) rather than a link.
 
 The live suite is the only thing that exercises the x402 handshake, because the signature *is* the authentication and no mock can stand in for it. It is deliberately excluded from `npm test` so it never runs by accident.
 
