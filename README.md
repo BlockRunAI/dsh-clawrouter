@@ -145,6 +145,13 @@ dsh plugin --profile web add dsh-clawrouter
 export BASE_CHAIN_WALLET_KEY=0x...   # or store it via the credentials service
 ```
 
+**Where does the key come from?** There is no API key to paste — authentication is a wallet signature.
+
+- **Already run a BlockRun tool?** You have a wallet already. The SDK keeps it at `~/.blockrun/.session`, ClawRouter at `~/.openclaw/blockrun/wallet.key`. Export whichever exists: `export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
+- **No wallet yet?** `npx -y @blockrun/clawrouter` generates one and prints its address. Stop it once you have the address, send it a few USDC on Base, then export the key.
+
+This plugin reads neither file on its own. A credential nobody configured, quietly shadowing the one they did, is exactly what the harness credentials seam exists to prevent — so it only ever reads the reference you name.
+
 $5 of USDC on Base covers thousands of calls. The key is a **reference** in configuration (`walletKeyEnv`), resolved per request — rotating it takes effect on the very next call, and no secret enters a config file.
 
 ## Configuration

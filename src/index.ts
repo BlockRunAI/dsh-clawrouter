@@ -136,10 +136,26 @@ export function apply(ctx: Context, config: Config): void {
       const ambient = launchEnvironmentOf(ctx).get(ref)
       if (ambient !== undefined && ambient.value.length > 0) return assertUsableWalletKey(ambient.value, ref)
     }
+    // The diagnostic answers "what do I do now" in the two states a reader is
+    // actually in. Someone already running a BlockRun tool has a funded wallet
+    // on disk and no idea this route cannot see it; someone new has never held
+    // a private key and cannot act on "set this variable" at all. Both paths
+    // below were run before being recommended.
+    //
+    // Two locations because the ecosystem has two: the SDK writes
+    // ~/.blockrun/.session and ClawRouter writes ~/.openclaw/blockrun/wallet.key.
+    //
+    // This route deliberately reads neither. A credential nobody configured,
+    // quietly shadowing the one they did, is the confusion the credentials
+    // seam exists to prevent.
     throw new LlmError(
-      `dsh-clawrouter: no wallet key for provider route "${provider}"; store ${ref} through the credentials`
-      + ` service, or export ${ref} in the launching environment. BlockRun authenticates with a wallet`
-      + ' signature — there is no API key to paste.',
+      `dsh-clawrouter: no wallet key for provider route "${provider}".`
+      + ' BlockRun authenticates with a wallet signature — there is no API key to paste.\n'
+      + '  Have a BlockRun wallet already? Look in ~/.blockrun/.session or ~/.openclaw/blockrun/wallet.key:\n'
+      + `      export ${ref}=$(cat ~/.blockrun/.session)\n`
+      + '  No wallet yet? `npx -y @blockrun/clawrouter` generates one and prints its address;\n'
+      + '  stop it once you have noted the address, send it a few USDC on Base, then export the key.\n'
+      + `  ${ref} can also be stored through the credentials service instead of the environment.`,
       'MISSING_CREDENTIAL',
     )
   }

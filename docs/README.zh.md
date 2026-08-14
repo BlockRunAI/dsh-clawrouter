@@ -143,6 +143,13 @@ dsh plugin --profile web add dsh-clawrouter
 export BASE_CHAIN_WALLET_KEY=0x...   # 也可以存进 credentials 服务
 ```
 
+**这个 key 从哪来？** 没有 API key 可粘贴——认证方式就是钱包签名。
+
+- **用过 BlockRun 的其他工具？** 那你已经有钱包了。SDK 存在 `~/.blockrun/.session`，ClawRouter 存在 `~/.openclaw/blockrun/wallet.key`。哪个存在就导出哪个：`export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
+- **还没有钱包？** `npx -y @blockrun/clawrouter` 会生成一个并打印地址。记下地址后停掉它，往这个地址转几美元 USDC（Base 链），然后导出私钥。
+
+本插件**不会自己去读**这两个文件。一个「用户没配置过、却悄悄盖住了他真正配置的那个」的凭据，正是 harness 凭据机制要防的事——所以它只读你指定的那个引用。
+
 Base 链上 5 美元的 USDC 够跑几千次调用。配置里写的是**引用**（`walletKeyEnv`）而不是密钥本身，并且每次请求实时解析——换密钥下一次调用即生效，任何密钥都不会进入配置文件。
 
 ## 配置项

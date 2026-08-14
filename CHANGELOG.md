@@ -4,6 +4,17 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.5 — 2026-08-14
+
+### Fixed
+- **The first run dead-ended for anyone without a wallet.** Running with no credential produced a correct error — name the variable, name the route, explain there is no API key — and then stopped, because it never said where a wallet comes from. A developer who has never held a private key cannot act on "set this variable".
+
+  The diagnostic now covers both real starting states, and both were run before being recommended:
+  - a wallet already exists, at `~/.blockrun/.session` (SDK) or `~/.openclaw/blockrun/wallet.key` (ClawRouter) — the ecosystem uses two locations
+  - no wallet exists, and `npx -y @blockrun/clawrouter` generates one and prints its address
+
+  This route still reads neither file. A credential nobody configured, silently shadowing the one they did, is what the credentials seam exists to prevent.
+
 ## 0.3.4 — 2026-08-14
 
 ### Fixed
