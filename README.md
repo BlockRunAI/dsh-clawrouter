@@ -177,9 +177,9 @@ DeepSeek serves no vision model, so this is capability rather than savings. Atta
 | `moonshot/kimi-k3` | answered correctly |
 | `openai/gpt-4o`, `gpt-4.1`, `gpt-5.6-sol` | **HTTP 400 after taking payment** |
 | `xai/grok-4.5` | HTTP 503 after taking payment |
-| `anthropic/claude-sonnet-5`, `claude-opus-5` | **charged, then streamed nothing** — no error, no content |
+| `anthropic/claude-sonnet-5`, `claude-opus-5` | **HTTP 200, upstream 400 relayed as the model's answer** |
 
-Anthropic's is the worst of these: downstream it is indistinguishable from a model that had nothing to say. So a model is offered image input only when the gateway tags it `vision` **and** it appears in `visionModels`, which defaults to the four measured to work. Both signals must agree — the tag alone over-claims, and the list alone would keep claiming vision for a model the gateway has since retagged.
+Anthropic's is the worst of these. The call returns 200 and streams `[Error: 400 {"message":"Could not process image"}]` as assistant text, so the harness sees an ordinary successful turn and the agent acts on the error string as though the model wrote it. This plugin now detects that exact shape — the whole message being nothing but a relayed error — and finishes the request as a failure with the status mapped as if it had arrived as one. An answer that merely mentions an error, or a turn that also called a tool, is left alone. So a model is offered image input only when the gateway tags it `vision` **and** it appears in `visionModels`, which defaults to the four measured to work. Both signals must agree — the tag alone over-claims, and the list alone would keep claiming vision for a model the gateway has since retagged.
 
 Widen it yourself as you verify others; that is a config change, not a release here.
 

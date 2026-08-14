@@ -110,3 +110,102 @@ describe('StreamTranslator', () => {
     expect(translator.end()).toEqual([])
   })
 })
+
+describe('a completed response with no content', () => {
+  // Measured: both Anthropic models answer an image request this way through
+  // the gateway — payment taken, `stop` reported, nothing streamed. Passing it
+  // through as success hands the agent an empty assistant turn that reads as a
+  // model with nothing to say, and nothing downstream can tell the difference.
+
+  it('finishes with EMPTY_RESPONSE instead of a successful empty message', () => {
+    const translator = new StreamTranslator()
+    translator.accept({ choices: [{ delta: {}, finish_reason: 'stop' }] })
+    const out = translator.end()
+    const finish = out.find(chunk => chunk.type === 'finish')
+    expect(finish).toEqual({
+      type: 'finish',
+      reason: {
+        kind: 'error',
+        failure: { message: 'model returned a completed response with no content', code: 'EMPTY_RESPONSE' },
+      },
+    })
+  })
+
+  it('still reports usage before that finish, so the call is accounted for', () => {
+    // The request was paid for whether or not it produced anything; dropping
+    // the usage record would hide a charge that really happened.
+    const translator = new StreamTranslator()
+    translator.accept({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 9, completion_tokens: 0 } })
+    const kinds = translator.end().map(chunk => chunk.type)
+    expect(kinds).toEqual(['usage', 'finish'])
+  })
+
+  it('leaves a stop finish alone when content did arrive', () => {
+    const translator = new StreamTranslator()
+    translator.accept({ choices: [{ delta: { content: 'hello' }, finish_reason: 'stop' }] })
+    const finish = translator.end().find(chunk => chunk.type === 'finish')
+    expect(finish).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+  })
+
+  it('leaves a non-stop finish alone even with no blocks', () => {
+    // `length` with nothing emitted is a real, reportable outcome: the model
+    // hit the cap before producing anything. Relabelling it would lose that.
+    const translator = new StreamTranslator()
+    translator.accept({ choices: [{ delta: {}, finish_reason: 'length' }] })
+    const finish = translator.end().find(chunk => chunk.type === 'finish')
+    expect(finish).toEqual({ type: 'finish', reason: { kind: 'max-tokens' } })
+  })
+})
+
+describe('an upstream error the gateway relayed as assistant text', () => {
+  // Measured against the live gateway: an image request to
+  // anthropic/claude-sonnet-5 or claude-opus-5 returns HTTP 200 and streams
+  // the upstream 400 as the model's answer. Payment is taken, the harness sees
+  // an ordinary successful turn, and the agent acts on the error string.
+  const RELAYED = '\n\n[Error: 400 {"type":"error","error":{"type":"invalid_request_error",'
+    + '"message":"Could not process image"},"request_id":"req_011"}]'
+
+  it('finishes with a failure instead of handing the agent the error string', () => {
+    const translator = new StreamTranslator()
+    translator.accept({ choices: [{ delta: { content: RELAYED }, finish_reason: 'stop' }] })
+    const finish = translator.end().find(chunk => chunk.type === 'finish') as {
+      reason: { kind: string; failure?: { code: string; message: string } }
+    }
+    expect(finish.reason.kind).toBe('error')
+    expect(finish.reason.failure?.code).toBe('INVALID_REQUEST')
+    expect(finish.reason.failure?.message).toContain('Could not process image')
+  })
+
+  it('maps the relayed status the same way a real one would be', () => {
+    const translator = new StreamTranslator()
+    translator.accept({ choices: [{ delta: { content: '[Error: 429 {"message":"slow down"}]' }, finish_reason: 'stop' }] })
+    const finish = translator.end().find(chunk => chunk.type === 'finish') as {
+      reason: { failure?: { code: string } }
+    }
+    expect(finish.reason.failure?.code).toBe('RATE_LIMIT')
+  })
+
+  it('leaves an answer that merely mentions an error alone', () => {
+    // The anchor is the whole point: a model explaining an error is ordinary
+    // work, and relabelling it would break far more than it fixed.
+    const translator = new StreamTranslator()
+    translator.accept({ choices: [{
+      delta: { content: 'You are seeing [Error: 400 {"a":1}] because the payload was malformed.' },
+      finish_reason: 'stop',
+    }] })
+    const finish = translator.end().find(chunk => chunk.type === 'finish')
+    expect(finish).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+  })
+
+  it('leaves a response that also called a tool alone', () => {
+    // Whatever its text says, a turn that called a tool did real work.
+    const translator = new StreamTranslator()
+    translator.accept({ choices: [{ delta: { content: '[Error: 400 {"x":1}]' }, finish_reason: null }] })
+    translator.accept({ choices: [{
+      delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'bash', arguments: '{}' } }] },
+      finish_reason: 'stop',
+    }] })
+    const finish = translator.end().find(chunk => chunk.type === 'finish')
+    expect((finish as { reason: { kind: string } }).reason.kind).toBe('stop')
+  })
+})

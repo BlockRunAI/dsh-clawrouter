@@ -13,6 +13,7 @@
  * @module dsh-clawrouter/translate
  */
 
+import { httpErrorCode } from './http-error.ts'
 import { CallId, EMPTY_RESPONSE_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, FinishReason, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { BlockrunStreamChunk, BlockrunToolCallDelta } from './types.ts'
@@ -27,6 +28,23 @@ interface OpenBlock {
   callId?: string
   name?: string
 }
+
+/**
+ * An upstream failure this gateway returned as assistant text rather than as an
+ * HTTP status.
+ *
+ * Measured: an image request to `anthropic/claude-sonnet-5` and
+ * `claude-opus-5` returns HTTP 200 and streams
+ * `\n\n[Error: 400 {"type":"error","error":{"message":"Could not process
+ * image"},...}]` as the model's answer. Nothing downstream can tell that from
+ * a real reply, so the agent acts on the error string as if the model wrote
+ * it — and the call is already paid for.
+ *
+ * Anchored to the whole message, so it fires only when the entire response is
+ * this and nothing else. A model quoting an error inside a longer answer, or
+ * discussing one, is ordinary and must not be relabelled.
+ */
+const GATEWAY_ERROR_AS_TEXT = /^\[Error: (\d{3})\s+([\s\S]*)\]$/
 
 /** Accumulates one response and emits harness chunks in protocol order. */
 export class StreamTranslator {
@@ -71,7 +89,8 @@ export class StreamTranslator {
 
   /**
    * Close the response and flush the terminal chunks.
-   * @returns every open `block-end`, then `usage`, then exactly one `finish`.
+   * @returns every open `block-end`, then `usage`, then exactly one `finish`; a completed-but-empty
+   *   response finishes with an `EMPTY_RESPONSE` error rather than as a successful empty message.
    * @throws LlmError `EMPTY_RESPONSE` when the stream ended with no content and no finish reason.
    */
   end(): StreamChunk[] {
@@ -92,7 +111,26 @@ export class StreamTranslator {
         ? { kind: 'tool-calls' }
         : { kind: 'stop' }
     }
-    out.push({ type: 'finish', reason: this.#finish })
+    out.push({
+      type: 'finish',
+      // A provider that says `stop` while having emitted nothing has completed
+      // a response with no content. Passing that through as success gives the
+      // agent an empty assistant turn indistinguishable from a model with
+      // nothing to say — and the call is already paid for. Measured against
+      // this gateway: both Anthropic models do exactly this for an image
+      // request, charging and streaming no content and no error.
+      //
+      // Distinct from the throw above, which is a stream that ended without
+      // the provider ever saying it was finished. This one completed; it just
+      // completed empty. Matches the first-party DeepSeek adapter.
+      reason: gatewayFailure(this.#finish, [...this.#blocks.values()])
+        ?? (this.#finish.kind === 'stop' && this.#blocks.size === 0
+        ? {
+          kind: 'error',
+          failure: { message: 'model returned a completed response with no content', code: EMPTY_RESPONSE_CODE },
+        }
+          : this.#finish),
+    })
     return out
   }
 
@@ -163,6 +201,33 @@ function assemble(block: OpenBlock): ContentBlock {
         // which every provider spells `{}` — the model never sent the string.
         arguments: block.text.length === 0 ? '{}' : block.text,
       }
+  }
+}
+
+/**
+ * Recognize a response whose entire content is an upstream error the gateway
+ * relayed as text.
+ *
+ * @param finish - the finish reason the provider reported.
+ * @param blocks - every block opened during the response.
+ * @returns an error finish reason, or `undefined` when this is an ordinary response.
+ */
+function gatewayFailure(finish: FinishReason, blocks: readonly OpenBlock[]): FinishReason | undefined {
+  // Only a lone text block qualifies. A response that also called a tool, or
+  // reasoned, did real work whatever its text says.
+  if (finish.kind !== 'stop' || blocks.length !== 1) return undefined
+  const [block] = blocks
+  if (block === undefined || block.kind !== 'text') return undefined
+  const match = GATEWAY_ERROR_AS_TEXT.exec(block.text.trim())
+  if (match === null) return undefined
+  const status = Number(match[1])
+  const detail = match[2] ?? ''
+  return {
+    kind: 'error',
+    failure: {
+      message: `the gateway relayed an upstream HTTP ${status} as assistant text: ${detail.slice(0, 200)}`,
+      code: httpErrorCode(status, detail),
+    },
   }
 }
 

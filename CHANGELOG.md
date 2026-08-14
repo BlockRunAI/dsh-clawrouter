@@ -4,7 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.5.1 — 2026-08-14
+## 0.6.0 — 2026-08-14
+
+### Fixed
+- **An upstream error the gateway relays as assistant text is now a failure, not an answer.** Measured: an image request to `anthropic/claude-sonnet-5` or `claude-opus-5` returns HTTP 200 and streams `[Error: 400 {"message":"Could not process image"}]` as the model's reply. The harness sees an ordinary successful turn, the call is paid for, and the agent acts on the error string as though the model wrote it. Detection is anchored to the whole message, so an answer that merely mentions an error, or a turn that also called a tool, is untouched. The relayed status maps exactly as it would have if it had arrived as a real one.
+- **A completed response with no content finishes with `EMPTY_RESPONSE`** rather than as a successful empty message, matching the first-party DeepSeek adapter. Previously only a stream with no finish reason at all was caught.
+
+### Corrected
+- **0.5.0 described the Anthropic vision failure wrongly.** It said those models "charged, then streamed nothing — no error, no content". They stream a great deal: the upstream error, as the answer. The original observation was truncated by `head` because the relayed text begins with two newlines, and the blank line got read as an empty response. The corrected behaviour is worse than what was published, not better.
+
+
 
 ### Fixed
 - A bare string was passed where the e2e vision test needed a branded `AttachmentId`. The test typecheck reported it and 0.5.0 was published anyway — the check is only worth having if publishing waits for it, so `prepublishOnly` now runs both typecheck programs and the unit suite.

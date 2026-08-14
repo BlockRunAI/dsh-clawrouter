@@ -28,6 +28,30 @@ import type {
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import { BlockrunCatalog, suggestModels, toModelInfo } from './catalog.ts'
+import { httpErrorCode } from './http-error.ts'
+export { httpErrorCode } from './http-error.ts'
+
+/**
+ * Whether a failed request was, by our own accounting, too big for the model.
+ *
+ * The gateway sanitizes upstream errors down to `{"message":"API request
+ * failed"}`, so the wording the text detectors need never arrives — a real
+ * overflow measured against the live gateway matched none of them. Request size
+ * is the only signal left.
+ *
+ * It is checked ONLY after a 400 and only against the model's own declared
+ * window, so an ordinary bad-parameter 400 on a normal-sized prompt is
+ * untouched. The remaining false positive — an oversized prompt rejected for
+ * some unrelated reason — asks the harness to compact a request that was too
+ * large anyway, which is the right move regardless of why it failed.
+ * @param bodyChars - serialized request size in characters.
+ * @param contextWindow - the model's declared capacity, when known.
+ * @returns whether the request exceeded that capacity.
+ */
+export function looksOversized(bodyChars: number, contextWindow: number | undefined): boolean {
+  if (contextWindow === undefined || contextWindow <= 0) return false
+  return bodyChars / CHARS_PER_TOKEN > contextWindow
+}
 import { buildRequestBody } from './serialize.ts'
 import type { ImageResolver } from './serialize.ts'
 import { StreamTranslator } from './translate.ts'
@@ -320,47 +344,6 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  */
 const CHARS_PER_TOKEN = 4
 
-/**
- * Whether a failed request was, by our own accounting, too big for the model.
- *
- * The gateway sanitizes upstream errors down to `{"message":"API request
- * failed"}`, so the wording the text detectors need never arrives — a real
- * overflow measured against the live gateway matched none of them. Request size
- * is the only signal left.
- *
- * It is checked ONLY after a 400 and only against the model's own declared
- * window, so an ordinary bad-parameter 400 on a normal-sized prompt is
- * untouched. The remaining false positive — an oversized prompt rejected for
- * some unrelated reason — asks the harness to compact a request that was too
- * large anyway, which is the right move regardless of why it failed.
- * @param bodyChars - serialized request size in characters.
- * @param contextWindow - the model's declared capacity, when known.
- * @returns whether the request exceeded that capacity.
- */
-export function looksOversized(bodyChars: number, contextWindow: number | undefined): boolean {
-  if (contextWindow === undefined || contextWindow <= 0) return false
-  return bodyChars / CHARS_PER_TOKEN > contextWindow
-}
-
-export function httpErrorCode(status: number, detail = ''): string {
-  if (status === 401 || status === 403) return 'AUTH'
-  // x402's own status, checked before the quota wording below: "insufficient
-  // balance" on a 402 is this wallet being short, which is the more precise
-  // answer than a generic account-quota failure.
-  if (status === 402) return 'PAYMENT_REQUIRED'
-  if (isQuotaExceededError(detail)) return QUOTA_EXCEEDED_CODE
-  if (status === 429) return 'RATE_LIMIT'
-  if (status === 400) {
-    // Compaction's overflow recovery keys on this exact code
-    // (`compaction-basic` compares `failure.code`), so reporting an overflow
-    // as a plain invalid request silently costs a long session its automatic
-    // recovery: it fails instead of compacting and carrying on.
-    if (isContextWindowExceededError(detail)) return CONTEXT_WINDOW_EXCEEDED_CODE
-    return 'INVALID_REQUEST'
-  }
-  if (status >= 500) return 'SERVER'
-  return `HTTP_${status}`
-}
 
 /**
  * The provider wording a failure carries, for the detectors above.
