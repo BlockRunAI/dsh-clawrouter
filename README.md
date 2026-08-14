@@ -101,6 +101,20 @@ Mentioning a command is not running one — `grep -rn "rm -rf" docs/` is not fla
 
 **When the reviewer is unreachable**, the gate escalates to you (`onReviewerFailure: ask`, the default). It never silently allows — a safety gate that fails open is worse than none — and never hard-blocks on a network blip. Unattended automation can set `deny`.
 
+### What it costs to leave on
+
+Measured, because this is the question that decides whether you keep it enabled:
+
+| | |
+|---|---|
+| Fires on ordinary work | **never** — 0 of 32 commands from a real session (`ls`, `npm test`, `git commit`, `git push origin feature/x`, `rm build/output.txt`, `chmod 644`, …) |
+| Misses dangerous work | **none** of the destructive set |
+| Cost when it does fire | **$0.0048** on `claude-opus-5`, $0.002 on cheaper reviewers |
+| Latency when it does fire | ~3s |
+| What the reviewer sees | ~356 tokens — the flagged call, not your conversation |
+
+So during normal work it is invisible: no latency, no cost, no prompts. It bills roughly half a cent on the rare command that deserves a second opinion. A test asserts that zero-of-32 figure, so a future rule that starts flagging `npm test` fails CI rather than your session.
+
 ### 2. `/spend`
 
 ```
@@ -217,7 +231,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 183 offline tests, including two real-cordis-Loader compositions
+npm test          # 185 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 

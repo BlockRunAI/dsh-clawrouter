@@ -4,6 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.9 — 2026-08-14
+
+### Measured
+- **What the gate costs to leave on**, which is the question that decides whether anyone keeps it enabled. Against 32 commands from a real coding session it fired **zero** times, and it missed **none** of the destructive set. One review is ~356 tokens — the flagged call, not the conversation — quoting **$0.0048** on `claude-opus-5` and $0.002 on cheaper reviewers, and taking about 3 seconds.
+
+  So it is invisible during ordinary work and bills about half a cent on the rare command that earns a second opinion. Both figures are in the READMEs.
+
+### Added
+- A test asserting the zero-of-32 trigger rate. The failure this guards against is a future rule that starts flagging `npm test` — noise is how a safety gate gets switched off, and it should fail CI rather than someone's session.
+
 ## 0.3.8 — 2026-08-14
 
 ### Fixed
