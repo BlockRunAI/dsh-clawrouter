@@ -128,6 +128,11 @@ export class BlockrunAdapter extends LlmAdapter {
     const model = auxiliaryModelFor(options, connection)
     await this.#assertServable(model, options.signal)
     const body = buildRequestBody(model === options.model ? options : { ...options, model })
+    // Captured before dispatch: if this request comes back 400, its size
+    // against the model's own declared window is the only overflow signal the
+    // gateway leaves us.
+    const bodyChars = JSON.stringify(body).length
+    const capacity = await this.#declaredContextWindow(model, options.signal)
 
     const client = new BlockrunClient({
       privateKey,
@@ -144,7 +149,7 @@ export class BlockrunAdapter extends LlmAdapter {
         try {
           next = await iterator.next()
         } catch (error) {
-          throw asLlmError(error)
+          throw asLlmError(error, looksOversized(bodyChars, capacity))
         }
         if (next.done === true) break
         // Checked again after the await: a turn cancelled while this read was
@@ -162,6 +167,20 @@ export class BlockrunAdapter extends LlmAdapter {
         // The SDK's cleanup path is best-effort and nothing downstream can act
         // on its failure; the caller's own abort or error is the real outcome.
       })
+    }
+  }
+
+  /**
+   * The model's declared capacity, or undefined when the catalog cannot say.
+   *
+   * A catalog failure must not break a request that would otherwise work, so
+   * this only ever weakens the classification above.
+   */
+  async #declaredContextWindow(model: string, signal?: AbortSignal): Promise<number | undefined> {
+    try {
+      return (await this.#options.catalog.resolve(model, signal)).context?.contextWindow
+    } catch {
+      return undefined
     }
   }
 
@@ -238,6 +257,34 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * @param status - status of a non-2xx gateway response.
  * @returns the normalized harness error code.
  */
+/**
+ * Chars per token, matching `dsh-token-meter`'s own fixed heuristic. Used only
+ * to size a request that already failed, never to price or gate one.
+ */
+const CHARS_PER_TOKEN = 4
+
+/**
+ * Whether a failed request was, by our own accounting, too big for the model.
+ *
+ * The gateway sanitizes upstream errors down to `{"message":"API request
+ * failed"}`, so the wording the text detectors need never arrives — a real
+ * overflow measured against the live gateway matched none of them. Request size
+ * is the only signal left.
+ *
+ * It is checked ONLY after a 400 and only against the model's own declared
+ * window, so an ordinary bad-parameter 400 on a normal-sized prompt is
+ * untouched. The remaining false positive — an oversized prompt rejected for
+ * some unrelated reason — asks the harness to compact a request that was too
+ * large anyway, which is the right move regardless of why it failed.
+ * @param bodyChars - serialized request size in characters.
+ * @param contextWindow - the model's declared capacity, when known.
+ * @returns whether the request exceeded that capacity.
+ */
+export function looksOversized(bodyChars: number, contextWindow: number | undefined): boolean {
+  if (contextWindow === undefined || contextWindow <= 0) return false
+  return bodyChars / CHARS_PER_TOKEN > contextWindow
+}
+
 export function httpErrorCode(status: number, detail = ''): string {
   if (status === 401 || status === 403) return 'AUTH'
   // x402's own status, checked before the quota wording below: "insufficient
@@ -286,7 +333,7 @@ function failureDetail(error: unknown): string {
  * `@blockrun/llm` reports HTTP status as `statusCode`; `status` is accepted
  * too so an error from any other layer still carries its status through.
  */
-function asLlmError(error: unknown): LlmError {
+function asLlmError(error: unknown, oversized = false): LlmError {
   if (error instanceof LlmError) return error
   const message = error instanceof Error ? error.message : String(error)
   const raw = (error as { statusCode?: unknown; status?: unknown })
@@ -297,9 +344,12 @@ function asLlmError(error: unknown): LlmError {
   // A payment the SDK rejected before any request carries no status of its own.
   const paymentRejected = error instanceof Error && error.name === 'PaymentError'
   const detail = failureDetail(error)
-  const code = status !== undefined
+  const mapped = status !== undefined
     ? httpErrorCode(status, detail)
     : paymentRejected ? 'PAYMENT_REQUIRED' : 'TRANSPORT'
+  // The text detectors get first say, so this stays correct the moment the
+  // gateway stops sanitizing upstream errors away.
+  const code = mapped === 'INVALID_REQUEST' && oversized ? CONTEXT_WINDOW_EXCEEDED_CODE : mapped
   return new LlmError(`BlockRun request failed: ${message}`, code, {
     cause: error,
     ...status === undefined ? {} : { status },

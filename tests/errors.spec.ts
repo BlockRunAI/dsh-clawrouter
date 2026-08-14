@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { auxiliaryModelFor, httpErrorCode } from '../src/adapter.ts'
+import { auxiliaryModelFor, httpErrorCode, looksOversized } from '../src/adapter.ts'
 
 // The harness retries exactly these and fails fast on everything else
 // (dsh-llm's DEFAULT_RETRYABLE_CODES).
@@ -91,5 +91,41 @@ describe('auxiliaryModelFor', () => {
       .toBe('anthropic/claude-opus-5')
     expect(auxiliaryModelFor({ model: 'anthropic/claude-opus-5', purpose: 'compaction' }, { auxiliaryModel: '' }))
       .toBe('anthropic/claude-opus-5')
+  })
+})
+
+describe('looksOversized — the only overflow signal this gateway leaves', () => {
+  it('recognises a request larger than the model can hold', () => {
+    // Measured against the live gateway: gpt-4o rejected a 140K-token prompt
+    // with body {"message":"API request failed"} — every word the text
+    // detectors look for had been sanitized away.
+    expect(looksOversized(128_000 * 4 + 1, 128_000)).toBe(true)
+  })
+
+  it('leaves an ordinary request alone', () => {
+    expect(looksOversized(4_000, 128_000)).toBe(false)
+    expect(looksOversized(128_000 * 4, 128_000)).toBe(false)
+  })
+
+  it('says nothing when the capacity is unknown', () => {
+    // A catalog that could not answer must weaken the classification, never
+    // invent one.
+    expect(looksOversized(10_000_000, undefined)).toBe(false)
+    expect(looksOversized(10_000_000, 0)).toBe(false)
+  })
+})
+
+describe('the sanitized 400 the gateway really returns', () => {
+  const SANITIZED = JSON.stringify({ message: 'API request failed' })
+
+  it('is not recognised by the text detectors, which is why size matters', () => {
+    // Documents the reason the size heuristic exists. If this ever starts
+    // returning CONTEXT_WINDOW_EXCEEDED, the gateway stopped sanitizing and
+    // the heuristic has become a backstop rather than the only signal.
+    expect(httpErrorCode(400, SANITIZED)).toBe('INVALID_REQUEST')
+  })
+
+  it('still classifies by text first when the wording survives', () => {
+    expect(httpErrorCode(400, 'maximum context length is 128000 tokens')).toBe('CONTEXT_WINDOW_EXCEEDED')
   })
 })

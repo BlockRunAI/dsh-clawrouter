@@ -4,6 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.2.8 — 2026-08-14
+
+### Fixed
+- **Compaction recovery still did not fire, despite 0.2.6.** That release mapped context overflow to `CONTEXT_WINDOW_EXCEEDED` using the harness's text detectors. Measured against the live gateway, a real overflow comes back as `{"message":"API request failed"}` — the gateway sanitizes the provider's wording away, so the detectors match nothing and the failure fell through to `INVALID_REQUEST`. The 0.2.6 entry claimed a recovery that was never actually reached.
+
+  Request size is the signal that survives: after a 400, and only then, a request larger than the model's own declared window is classified as an overflow. The text detectors still run first, so this corrects itself the moment the gateway stops sanitizing.
+
+### Measured
+- The understated context window is **specific, not systemic**. `gpt-4.1-mini` accepted 140,008 tokens against a declared 128,000; `gpt-4o` rejected the same prompt at the same declared figure. So the gpt-4.1 family is understated and the rest of the catalog is right — a precise upstream fix rather than a broad one.
+
 ## 0.2.7 — 2026-08-14
 
 ### Documented
@@ -15,7 +25,7 @@ Entries say what changed for *you*, and what it meant when it was wrong — most
 ## 0.2.6 — 2026-08-14
 
 ### Fixed
-- **Long sessions lost automatic compaction recovery.** `compaction-basic` decides whether to recover from a context overflow by comparing the failure code against `CONTEXT_WINDOW_EXCEEDED`. This adapter reported an overflow as a plain `INVALID_REQUEST`, so the recovery never fired and the session simply failed instead of compacting and carrying on.
+- **Long sessions lost automatic compaction recovery.** (Only partly, as it turned out — see 0.2.8: the gateway sanitizes the wording these detectors need, so this mapping did not fire in practice.) `compaction-basic` decides whether to recover from a context overflow by comparing the failure code against `CONTEXT_WINDOW_EXCEEDED`. This adapter reported an overflow as a plain `INVALID_REQUEST`, so the recovery never fired and the session simply failed instead of compacting and carrying on.
 
   Overflow and exhausted-quota wording are now detected with the harness's own `isContextWindowExceededError` / `isQuotaExceededError`, and mapped to `CONTEXT_WINDOW_EXCEEDED` and `QUOTA`. A `402` stays `PAYMENT_REQUIRED` even when it says "insufficient balance" — x402's own status is the more precise answer, and a short wallet is a different fix from an exhausted account.
 
