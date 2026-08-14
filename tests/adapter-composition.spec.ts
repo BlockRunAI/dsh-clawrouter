@@ -123,7 +123,7 @@ describe('provider route, booted through the real Loader', () => {
 
   it('removes the route when the fiber is disposed', async () => {
     const ctx = await boot(ABSENT)
-    const entry = ctx.loader.entries().find(e => e.options.name === 'dsh-clawrouter')
+    const entry = [...ctx.loader.entries()].find(e => e.options.name === 'dsh-clawrouter')
     await entry?.fiber?.dispose()
     expect(ctx.llm.listProviders().map(p => p.id)).not.toContain('blockrun')
   }, 30_000)
@@ -162,7 +162,7 @@ describe('/spend in the composed context', () => {
   it('disappears when the fiber is disposed', async () => {
     const ctx = await boot(ABSENT)
     const owner = agent(ctx)
-    const entry = ctx.loader.entries().find(e => e.options.name === 'dsh-clawrouter')
+    const entry = [...ctx.loader.entries()].find(e => e.options.name === 'dsh-clawrouter')
     await entry?.fiber?.dispose()
     expect(ctx.commands.list(owner).map(c => c.name)).not.toContain('spend')
   }, 30_000)

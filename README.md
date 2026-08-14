@@ -148,7 +148,18 @@ The default `requestFeeUsd` is `0.002` because that is what the gateway quotes: 
 
 Runs the same strong model over material you choose. For the case one user [reported](https://github.com/deepseek-ai/deepseek-harness/discussions/475): the agent read the right evidence, drew the wrong conclusion, and only a direct challenge surfaced the real bug.
 
-### 4. <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models from one wallet
+### 4. `/gate` — check the net is actually up
+
+```
+/gate         # is the gate armed, and with what?
+/gate drill   # put a dangerous command through the live reviewer
+```
+
+A safety feature that is quietly off is worse than one never installed, because you stopped watching. This gate can be off while everything a user can see looks right: `enabled` defaults to `false`, a patch layer **replaces** a row's whole `config` rather than merging keys, and `/review` registers either way — so a working `/review` tells you the plugin loaded and **nothing** about whether tool calls are being inspected.
+
+`/gate` is therefore registered whether or not the gate is armed, and says which. `/gate drill` sends `rm -rf / --no-preserve-root` through the risk matcher and the real reviewer — never to a tool — and reports each stage separately, because they fail for unrelated reasons: a rule that stopped matching is a policy problem, an unreachable reviewer is a wallet or model problem. At runtime those both collapse into "escalate", which is indistinguishable from the gate working. The drill is what tells them apart. It costs one reviewer call.
+
+### 5. <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models from one wallet
 
 Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account.
 

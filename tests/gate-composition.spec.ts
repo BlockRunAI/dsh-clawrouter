@@ -94,7 +94,7 @@ const Fixture = {
       description: 'Run a shell command.',
       parameters: { command: { type: 'string', required: true, description: 'the command' } },
       output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: v }] },
-      execute(args) {
+      async execute(args) {
         // Reaching here means the gate let the call through to real execution.
         ran.push(args.command)
         return `executed: ${args.command}`
@@ -286,7 +286,7 @@ describe('review gate, booted through the real Loader', () => {
     const owner = agent(ctx)
     expect(ctx.commands.list(owner).map(c => c.name)).toContain('review')
 
-    const entry = ctx.loader.entries().find(e => e.options.name === 'dsh-clawrouter/review')
+    const entry = [...ctx.loader.entries()].find(e => e.options.name === 'dsh-clawrouter/review')
     await entry?.fiber?.dispose()
 
     expect(ctx.commands.list(owner).map(c => c.name)).not.toContain('review')
@@ -409,5 +409,74 @@ describe('a misconfigured reviewer', () => {
 
     // Repeating an identical warning per call buries the one that matters.
     expect(errors.filter(line => /cannot be used/.test(line))).toHaveLength(1)
+  }, 30_000)
+})
+
+describe('/gate reports whether the net is actually up', () => {
+  /** Run `/gate` in a composed context and return the rendered text. */
+  async function runGate(ctx: Context, input = ''): Promise<string> {
+    const owner = agent(ctx)
+    const command = ctx.commands.list(owner).find(entry => entry.name === 'gate')
+    expect(command, '/gate is not registered').toBeDefined()
+    const line = input.length === 0 ? '/gate' : `/gate ${input}`
+    const execution = await ctx.commands.execute(owner, line, AbortSignal.timeout(20_000))
+    expect(execution, `command surface did not run ${line}`).toBeDefined()
+    const result = execution!.result as { text?: string }
+    return result.text ?? ''
+  }
+
+  it('is registered even when the gate is disabled', async () => {
+    // The whole reason this command exists. `/review` registers either way, so
+    // a user who mis-edited their patch layer sees a working command and
+    // concludes the gate is on; the only honest answer has to come from a
+    // command that is present precisely when nothing is being reviewed.
+    const ctx = await boot(['    enabled: false'])
+    const owner = agent(ctx)
+    expect(ctx.commands.list(owner).map(entry => entry.name)).toContain('gate')
+  }, 30_000)
+
+  it('says NOT ARMED, and says a working /review proves nothing', async () => {
+    const ctx = await boot(['    enabled: false'])
+    const text = await runGate(ctx)
+    expect(text).toContain('NOT ARMED')
+    expect(text).toContain('/review')
+    expect(text).toContain('enabled: true')
+  }, 30_000)
+
+  it('says ARMED and names the reviewer actually in use', async () => {
+    const ctx = await boot(ENABLED)
+    const text = await runGate(ctx)
+    expect(text).toContain('ARMED')
+    expect(text).not.toContain('NOT ARMED')
+  }, 30_000)
+
+  it('refuses to drill a gate that is not armed', async () => {
+    const ctx = await boot(['    enabled: false'])
+    const text = await runGate(ctx, 'drill')
+    expect(text).toMatch(/not armed/i)
+    expect(asked, 'a disarmed drill must not spend a reviewer call').toEqual([])
+  }, 30_000)
+
+  it('drills end to end and reports the reviewer denying the command', async () => {
+    behavior = { kind: 'reply', text: '{"ruling":"dangerous","reason":"This erases the filesystem."}' }
+    ran.length = 0
+    const ctx = await boot(ENABLED)
+    const text = await runGate(ctx, 'drill')
+    expect(text).toContain('risk matcher')
+    expect(text).toContain('dangerous')
+    expect(text).toContain('would have been denied')
+    expect(asked, 'the drill must consult the real reviewer path').toHaveLength(1)
+    expect(ran, 'the drill must never execute its own command').toEqual([])
+  }, 30_000)
+
+  it('reports an unreachable reviewer as unreachable, not as a verdict', async () => {
+    // At runtime a failed reviewer becomes `uncertain`, which is
+    // indistinguishable from the gate working. The drill exists to separate
+    // those, so it must not inherit that folding.
+    behavior = { kind: 'throw' }
+    const ctx = await boot(ENABLED)
+    const text = await runGate(ctx, 'drill')
+    expect(text).toContain('UNREACHABLE')
+    expect(text).not.toContain('ruled')
   }, 30_000)
 })

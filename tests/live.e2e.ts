@@ -266,7 +266,8 @@ live('an unfunded wallet, against the real gateway', () => {
         messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } })],
       } as never) as AsyncIterable<StreamChunk>) { /* drain */ }
     } catch (error) {
-      failure = { code: (error as { failure?: { code?: string } }).failure?.code, message: (error as Error).message }
+      const code = (error as { failure?: { code?: string } }).failure?.code
+      failure = { ...code === undefined ? {} : { code }, message: (error as Error).message }
     }
     // Not retryable, so an empty wallet fails fast rather than being retried
     // against three times.

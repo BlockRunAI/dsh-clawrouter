@@ -1,0 +1,16 @@
+// Typechecking face for tests. The base config emits `src` into `lib` with a
+// `rootDir`, so tests cannot simply be added to its `include` — they would
+// become build output. This program checks them and emits nothing.
+//
+// Worth having: a wrong discriminant in a test fixture (`kind: 'error'` for a
+// union of `'reply' | 'throw' | 'hang'`) matched no branch, silently ran the
+// test against the default behaviour, and passed the wrong scenario.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "declaration": false
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.mjs"]
+}

@@ -28,6 +28,7 @@ import {
   REVIEW_SYSTEM_PROMPT,
 } from './reviewer.ts'
 import type { RiskRule } from './reviewer.ts'
+import { DRILL_COMMAND, renderDrill, renderGateStatus } from './gate-status.ts'
 import type { ReviewVerdict } from './types.ts'
 
 export {
@@ -233,6 +234,70 @@ export function apply(ctx: Context, config: Config): void {
         return downstream.kind === 'allow' ? { kind: 'ask', reason } : downstream
       }
     }
+  })
+
+  // Registered whether or not the gate is armed, which is the entire point:
+  // the failure this answers is a user believing a disarmed gate is on. A
+  // command that only appeared when the gate worked could never report the
+  // one state worth asking about.
+  ctx.inject(['commands'], (commandCtx) => {
+    commandCtx.commands.register({
+      name: 'gate',
+      description: 'report whether the safety gate is armed; `drill` tests it end to end',
+      input: { hint: '[drill]' },
+      handler: async (invocation) => {
+        const status = {
+          armed: config.enabled === true,
+          reviewerProvider,
+          reviewerModel,
+          timeoutMs,
+          onReviewerFailure: onFailure,
+          ruleNames: rules.map(rule => rule.name),
+        }
+        if (invocation.rawInput.trim() !== 'drill') return { kind: 'success', text: renderGateStatus(status) }
+        if (!status.armed) {
+          return { kind: 'error', text: 'The gate is not armed, so there is nothing to drill. Run /gate.' }
+        }
+
+        const started = Date.now()
+        const match = matchRisk('bash', { command: DRILL_COMMAND }, rules)
+        if (match === undefined) {
+          return {
+            kind: 'error',
+            text: renderDrill({
+              command: DRILL_COMMAND,
+              matchedRule: undefined,
+              ruling: undefined,
+              elapsedMs: Date.now() - started,
+            }),
+          }
+        }
+        // The drill calls the reviewer directly rather than through `review()`,
+        // so a reviewer failure surfaces as UNREACHABLE instead of being folded
+        // into the `uncertain` ruling the gate uses at runtime. Telling those
+        // apart is what the drill exists for.
+        const signal = AbortSignal.any([invocation.signal, AbortSignal.timeout(timeoutMs)])
+        let ruling: 'safe' | 'dangerous' | 'uncertain' | undefined
+        let reason: string | undefined
+        try {
+          const verdict = parseVerdict(
+            await askReviewer(buildReviewPrompt('bash', { command: DRILL_COMMAND }, match), signal),
+          )
+          ruling = verdict.ruling
+          reason = verdict.reason
+        } catch (error) {
+          reason = describe(error)
+        }
+        const text = renderDrill({
+          command: DRILL_COMMAND,
+          matchedRule: match.rule,
+          ruling,
+          reason,
+          elapsedMs: Date.now() - started,
+        })
+        return ruling === 'dangerous' ? { kind: 'success', text } : { kind: 'error', text }
+      },
+    })
   })
 
   // Optional child fiber: the command appears wherever a command surface is

@@ -146,7 +146,18 @@ dsh plugin --profile web add dsh-clawrouter
 
 用同一个强模型审你指定的内容。有用户[反馈过](https://github.com/deepseek-ai/deepseek-harness/discussions/475)这种情况：智能体其实已经读到了关键证据，却先下了错误结论，直到被人追问才发现真正的 bug。
 
-### 4. 一个钱包，<!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个模型
+### 4. `/gate` —— 确认安全网真的是开着的
+
+```
+/gate         # 闸门armed了吗？用的什么配置？
+/gate drill   # 让一条危险命令走一遍真实审查模型
+```
+
+一个悄悄关着的安全功能，比从没装过更糟——因为你已经不看了。而这个闸门**可以在用户看到的一切都正常的情况下是关的**：`enabled` 默认 `false`，patch layer 会**整块替换**某一行的 `config` 而不是合并键，并且 `/review` 无论闸门开关都会注册——所以 `/review` 能用，只说明插件加载了，**完全不说明**工具调用有没有被审查。
+
+所以 `/gate` 无论闸门开不开都会注册，并直接告诉你是哪种状态。`/gate drill` 会把 `rm -rf / --no-preserve-root` 送进风险匹配器和真实的审查模型——**永远不会送给任何工具**——并分两段分别汇报，因为这两段的失败原因毫不相干：规则不再匹配是策略问题，审查模型连不上是钱包或模型问题。运行时这两种都会塌缩成「交给你」，而那和「闸门正常工作」长得一模一样。drill 就是用来把它们分开的。代价是一次审查调用。
+
+### 5. 一个钱包，<!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个模型
 
 注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
 

@@ -4,7 +4,17 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.3.13 — 2026-08-14
+## 0.4.0 — 2026-08-14
+
+### Added
+- **`/gate` — check the safety net is actually up.** The gate can be off while everything a user can see looks correct: `enabled` defaults to `false`, a patch layer replaces a row's whole `config` rather than merging keys, and `/review` registers either way — so a working `/review` is evidence the plugin loaded and no evidence at all that tool calls are inspected. `/gate` is registered whether or not the gate is armed, which is the point; a command that appeared only when the gate worked could never report the one state worth asking about.
+- **`/gate drill`** sends `rm -rf / --no-preserve-root` through the risk matcher and the live reviewer — never to a tool — and reports each stage separately. A rule that stopped matching is a policy problem; an unreachable reviewer is a wallet or model problem. At runtime both collapse into "escalate", which is indistinguishable from the gate working, so the drill deliberately does not reuse the gate's own error folding.
+- **Tests are typechecked.** `tsconfig.test.json` covers `tests/` and `scripts/`, which the base program excluded because it emits `src` into `lib` with a `rootDir`.
+
+### Fixed
+- Four latent type errors in tests that had never been checked, including a fixture using `kind: 'error'` against a `'reply' | 'throw' | 'hang'` union — it matched no branch, silently ran the default behaviour, and passed the wrong scenario.
+
+
 
 ### Fixed
 - **The model count said 70; the catalog exposes 67.** Eight sites across both READMEs carried `<!-- br:models.chatVisible -->` markers — the notation for generated content — but the script that fills them was never written, so the number froze at whatever was true the day it was typed.
