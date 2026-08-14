@@ -129,6 +129,21 @@ Base 链上 5 美元的 USDC 够跑几千次调用。配置里写的是**引用*
 | `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | 存放 EVM 钱包私钥的凭据**引用** |
 | `apiUrl` | `https://blockrun.ai/api` | API 根地址 |
 | `timeoutMs` | `300000` | 单次请求超时 |
+| `auxiliaryModel` | *(关闭)* | Harness 自身维护调用所用的模型——见下 |
+
+### 把 compaction 的开销降下来
+
+Harness 会通过「总结」来压缩长会话，而它用的是**当前对话正在用的那个模型**。挂在旗舰模型上，就意味着一次次用旗舰输入价来做总结，而且是整个会话反复做。
+
+一次约 10 万 token 的 compaction，**Claude Opus 5 上大约 $0.50**，**DeepSeek V4 Flash 上大约 $0.014**。总结本来就是便宜模型干得很好的活，而且这类调用和你的对话**不共享前缀**——挪走不损失任何缓存命中：
+
+```yaml
+- id: blockrun-llm
+  config:
+    auxiliaryModel: deepseek/deepseek-chat
+```
+
+默认关闭，且只影响 Harness 自己标记为维护性质的调用（compaction、会话标题）。**对话请求永远不会被改道。**
 
 `blockrun-review`（审查闸门）：
 
@@ -162,7 +177,7 @@ Base 链上 5 美元的 USDC 够跑几千次调用。配置里写的是**引用*
 ## 开发
 
 ```sh
-npm test          # 68 个离线测试，含两套走真实 cordis Loader 的组合测试
+npm test          # 114 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
 ```
 

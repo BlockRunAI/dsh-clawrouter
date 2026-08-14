@@ -58,6 +58,17 @@ export interface Config {
   apiUrl?: string
   /** Per-request SDK timeout in milliseconds. */
   timeoutMs?: number
+  /**
+   * Model serving the harness's own maintenance calls — context compaction and
+   * session titles — instead of the conversation's model.
+   *
+   * Compaction summarizes the WHOLE conversation, so on a flagship model a
+   * long session pays flagship input rates for a job a cheap model does well.
+   * Those calls share no prefix with the conversation, so moving them forfeits
+   * no prompt-cache hit. Omitted leaves them on the conversation model, which
+   * is what the harness does by default.
+   */
+  auxiliaryModel?: string
 }
 
 /** Runtime schema for {@link Config}. */
@@ -66,6 +77,7 @@ export const Config: z<Config> = z.object({
   walletKeyEnv: z.string().role('credential-ref').default('BASE_CHAIN_WALLET_KEY'),
   apiUrl: z.string().default(DEFAULT_API_URL),
   timeoutMs: z.natural().default(DEFAULT_TIMEOUT_MS),
+  auxiliaryModel: z.string(),
 })
 
 /**
@@ -79,7 +91,14 @@ export function apply(ctx: Context, config: Config): void {
   const ref = credentialRef(nonEmpty(config.walletKeyEnv, 'BASE_CHAIN_WALLET_KEY'))
   const timeoutMs = config.timeoutMs !== undefined && config.timeoutMs > 0 ? config.timeoutMs : DEFAULT_TIMEOUT_MS
 
-  const connection = (): BlockrunConnection => ({ apiUrl, timeoutMs })
+  const auxiliaryModel = config.auxiliaryModel !== undefined && config.auxiliaryModel.length > 0
+    ? config.auxiliaryModel
+    : undefined
+  const connection = (): BlockrunConnection => ({
+    apiUrl,
+    timeoutMs,
+    ...auxiliaryModel === undefined ? {} : { auxiliaryModel },
+  })
 
   // Resolved per operation, never cached: a wallet key rotated in the managed
   // store must reach the very next request without reloading this plugin.

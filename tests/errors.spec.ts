@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { httpErrorCode } from '../src/adapter.ts'
+import { auxiliaryModelFor, httpErrorCode } from '../src/adapter.ts'
 
 // The harness retries exactly these and fails fast on everything else
 // (dsh-llm's DEFAULT_RETRYABLE_CODES).
@@ -36,5 +36,28 @@ describe('httpErrorCode', () => {
   it('keeps genuinely transient failures retryable', () => {
     expect(RETRYABLE.has(httpErrorCode(429))).toBe(true)
     expect(RETRYABLE.has(httpErrorCode(500))).toBe(true)
+  })
+})
+
+describe('auxiliaryModelFor', () => {
+  it('leaves a conversation request on its own model', () => {
+    // A request the harness did not mark as maintenance is the user's choice
+    // of model, and is never redirected.
+    expect(auxiliaryModelFor({ model: 'anthropic/claude-opus-5' }, { auxiliaryModel: 'deepseek/deepseek-chat' }))
+      .toBe('anthropic/claude-opus-5')
+  })
+
+  it.each(['compaction', 'session-title'] as const)('moves a %s call to the auxiliary model', (purpose) => {
+    expect(auxiliaryModelFor({ model: 'anthropic/claude-opus-5', purpose }, { auxiliaryModel: 'deepseek/deepseek-chat' }))
+      .toBe('deepseek/deepseek-chat')
+  })
+
+  it('keeps maintenance calls on the conversation model when none is configured', () => {
+    // Off by default: this is the harness's own behaviour, and a deployment
+    // opts out of it explicitly rather than being surprised by a swap.
+    expect(auxiliaryModelFor({ model: 'anthropic/claude-opus-5', purpose: 'compaction' }, {}))
+      .toBe('anthropic/claude-opus-5')
+    expect(auxiliaryModelFor({ model: 'anthropic/claude-opus-5', purpose: 'compaction' }, { auxiliaryModel: '' }))
+      .toBe('anthropic/claude-opus-5')
   })
 })

@@ -131,6 +131,21 @@ $5 of USDC on Base covers thousands of calls. The key is a **reference** in conf
 | `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | credential *reference* holding the EVM wallet key |
 | `apiUrl` | `https://blockrun.ai/api` | API root |
 | `timeoutMs` | `300000` | per-request timeout |
+| `auxiliaryModel` | *(off)* | model for the harness's own maintenance calls — see below |
+
+### Cutting compaction cost
+
+The harness compacts long sessions by summarizing them — and it does that on **whatever model the conversation is using**. On a flagship model that means paying flagship input rates to summarize, repeatedly, for the whole session.
+
+A ~100K-token compaction runs about **$0.50 on Claude Opus 5** and about **$0.014 on DeepSeek V4 Flash**. Summarizing is a job a cheap model does well, and those calls share no prefix with your conversation — so moving them forfeits no prompt-cache hit:
+
+```yaml
+- id: blockrun-llm
+  config:
+    auxiliaryModel: deepseek/deepseek-chat
+```
+
+Off by default, and it only ever affects calls the harness itself marks as maintenance (compaction, session titles). **A conversation request is never redirected.**
 
 `blockrun-review` — the gate:
 
@@ -164,7 +179,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Development
 
 ```sh
-npm test          # 68 offline tests, including two real-cordis-Loader compositions
+npm test          # 114 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 ```
 

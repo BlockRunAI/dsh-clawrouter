@@ -34,6 +34,12 @@ export interface BlockrunConnection {
   apiUrl: string
   /** Per-request SDK timeout in milliseconds. */
   timeoutMs: number
+  /**
+   * Model serving the harness's maintenance calls — compaction and session
+   * titles — instead of the conversation's own. Absent leaves them on the
+   * conversation model, which is the harness default.
+   */
+  auxiliaryModel?: string
 }
 
 /** Constructor dependencies, kept explicit so the adapter owns no lifecycle. */
@@ -111,9 +117,10 @@ export class BlockrunAdapter extends LlmAdapter {
     // Credential first: it is a local check, and a deployment with no wallet
     // has a more fundamental problem than whichever model it named.
     const privateKey = await this.#options.resolveWalletKey()
-    await this.#assertServable(options.model, options.signal)
     const connection = this.#options.connection()
-    const body = buildRequestBody(options)
+    const model = auxiliaryModelFor(options, connection)
+    await this.#assertServable(model, options.signal)
+    const body = buildRequestBody(model === options.model ? options : { ...options, model })
 
     const client = new BlockrunClient({
       privateKey,
@@ -181,6 +188,31 @@ export class BlockrunAdapter extends LlmAdapter {
       'UNKNOWN_MODEL',
     )
   }
+}
+
+/**
+ * The model this request should actually use.
+ *
+ * The harness tags its own maintenance calls with `purpose` and otherwise
+ * reuses whatever model the conversation is on. Compaction is the expensive
+ * one: it sends the WHOLE conversation, so a long session being summarized by
+ * a flagship model pays flagship input rates to do a job a cheap model does
+ * well. It also shares no prefix with the conversation, so moving it costs no
+ * prompt-cache hit.
+ *
+ * A conversation request is never redirected — only calls the harness itself
+ * marked as maintenance, and only when a deployment named a model for them.
+ * @param options - the request, whose `purpose` marks a maintenance call.
+ * @param connection - the resolved connection carrying any auxiliary model.
+ * @returns the model id to send.
+ */
+export function auxiliaryModelFor(
+  options: Pick<GenerateOptions, 'model' | 'purpose'>,
+  connection: Pick<BlockrunConnection, 'auxiliaryModel'>,
+): string {
+  if (options.purpose === undefined) return options.model
+  const auxiliary = connection.auxiliaryModel
+  return auxiliary !== undefined && auxiliary.length > 0 ? auxiliary : options.model
 }
 
 /** Raise the caller's abort as the harness's terminal abort, before any chunk is emitted. */
