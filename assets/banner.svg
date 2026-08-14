@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="608" viewBox="0 0 2560 608">
+  <!-- Matches the ClawRouter family banner: white ground, emoji + wordmark in
+       the product's brand colour, a tagline whose key phrase is bold, and the
+       BlockRun attribution small and grey in the bottom-right corner.
+       Blue is DeepSeek's #4D6BFE, since this plugin lives in that ecosystem. -->
+  <rect width="2560" height="608" fill="#ffffff"/>
+
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" text-anchor="middle">
+    <text x="1280" y="268" font-size="150" font-weight="700" fill="#4D6BFE">
+      <tspan font-size="132">🛡️</tspan><tspan dx="34">dsh-clawrouter</tspan>
+    </text>
+
+    <text x="1280" y="404" font-size="66" fill="#1a1a1a" xml:space="preserve"><tspan>Review the dangerous command, </tspan><tspan font-weight="700">before it runs</tspan><tspan>.</tspan></text>
+  </g>
+
+  <text x="2460" y="556" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="34" font-weight="700" fill="#9a9a9a" text-anchor="end">brought to you by BlockRun.AI</text>
+</svg>

@@ -1,9 +1,10 @@
 <div align="center">
 
-<h1>dsh-clawrouter</h1>
+<img src="https://raw.githubusercontent.com/BlockRunAI/dsh-clawrouter/main/assets/banner.png" alt="dsh-clawrouter — review the dangerous command, before it runs" width="600">
 
-<p>给 DeepSeek Harness 智能体配一个「第二大脑」。<br>
-DeepSeek 又快又便宜，主循环就该继续用它。<br><br>
+<h1>给 DeepSeek Harness 智能体配一个「第二大脑」</h1>
+
+<p>DeepSeek 又快又便宜，主循环就该继续用它。<br><br>
 <strong>这个插件补的是它做不到的事：危险命令执行前，让更强的模型先审一遍。</strong><br><br>
 <em>一个钱包直调 <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个模型。不注册账号，不用 API Key，不用信用卡。</em></p>
 

@@ -1,9 +1,10 @@
 <div align="center">
 
-<h1>dsh-clawrouter</h1>
+<img src="https://raw.githubusercontent.com/BlockRunAI/dsh-clawrouter/main/assets/banner.png" alt="dsh-clawrouter — review the dangerous command, before it runs" width="600">
 
-<p>A second brain for your DeepSeek Harness agent.<br>
-DeepSeek is fast and cheap — keep it for the loop.<br><br>
+<h1>A second brain for your DeepSeek Harness agent</h1>
+
+<p>DeepSeek is fast and cheap — keep it for the loop.<br><br>
 <strong>This adds what it cannot do: a stronger model reviews the dangerous command before it runs.</strong><br><br>
 <em><!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models from one wallet. No accounts. No API keys. No credit card.</em></p>
 
