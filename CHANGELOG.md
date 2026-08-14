@@ -4,12 +4,21 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.1 — 2026-08-14
+
+### Fixed
+- **`/spend` counted nothing at all.** The translator buffers usage and emits it from `end()`; the adapter only watched the per-chunk output, so five real calls produced a meter reading of zero. Every unit test of the meter passed the whole time. Caught by comparing against the wallet, which is the only thing that could have caught it.
+- **The flat per-request fee is `$0.002`, not `$0.001`.** Measured against the gateway's own 402 quote (`{"amount":"0.002000"}` for a ~17-token request) and confirmed by the wallet moving exactly $0.006 across three calls. BlockRun's published pricing page says $0.001, so the previous default understated every total by half.
+
+### Corrected
+- **`/spend` is an estimate, not the billing formula.** 0.3.0 claimed it computed what BlockRun bills. What actually settles is the signed 402 quote, and the gateway prices that on estimated input plus `max_tokens` — the cap, not the tokens produced. A request capped at 4096 that answers in 50 is charged for far more than it used, and this counts actual usage, so it reads low by that gap. It is still worth showing, and now says why it is a floor rather than merely that it is one.
+
 ## 0.3.0 — 2026-08-14
 
 ### Added
 - **`/spend`** — what this route has cost since the process started: total, per model, token cost and flat fees separately.
 
-  0.2.9 corrected a note claiming spend landed in `~/.blockrun/cost_log.jsonl`; the streaming client this adapter uses never writes there. Rather than wait on the SDK, the figure is computed here from the provider's reported usage and the catalog's published rates — which is the formula BlockRun bills on rather than an approximation of it, because the gateway does not price cache hits differently. That last point is the same finding that makes routing a cache-warm loop through this gateway *more* expensive, used the other way round.
+  0.2.9 corrected a note claiming spend landed in `~/.blockrun/cost_log.jsonl`; the streaming client this adapter uses never writes there. Rather than wait on the SDK, the figure is computed here from the provider's reported usage and the catalog's published rates — which was described as the formula BlockRun bills on — see 0.3.1, where measuring against the wallet showed that settlement follows the 402 quote instead. That last point is the same finding that makes routing a cache-warm loop through this gateway *more* expensive, used the other way round.
 
   It counts only calls that completed, so it is a floor and says so; the wallet is the authority. A model the catalog publishes no rate for is reported as unpriced rather than counted as free, because a total that quietly omits calls is worse than one that admits the gap.
 - `requestFeeUsd` (default `0.001`) — the flat per-request fee, configurable because it is a published price rather than a protocol constant, and a stale number here would be a wrong total.

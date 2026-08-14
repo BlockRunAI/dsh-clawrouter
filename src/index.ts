@@ -39,8 +39,15 @@ export const DEFAULT_API_URL = 'https://blockrun.ai/api'
 /** Harness route key this plugin registers by default. */
 export const DEFAULT_PROVIDER = 'blockrun'
 
-/** BlockRun's published flat per-request x402 transaction fee. */
-export const DEFAULT_REQUEST_FEE_USD = 0.001
+/**
+ * Flat per-request x402 fee, as the gateway actually quotes it.
+ *
+ * Measured, not read from the price list: the 402 for a ~17-token request
+ * quotes `{"amount":"0.002000"}`, and three calls moved the wallet by exactly
+ * $0.006. BlockRun's published pricing page says $0.001; this follows the
+ * quote, because the quote is what settles.
+ */
+export const DEFAULT_REQUEST_FEE_USD = 0.002
 
 /** Default per-request SDK timeout; long reasoning responses routinely exceed a minute. */
 export const DEFAULT_TIMEOUT_MS = 300_000

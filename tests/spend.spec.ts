@@ -78,9 +78,11 @@ describe('SpendMeter', () => {
     const text = renderSpend(meter.summary())
     expect(text).not.toMatch(/\$0\.00\b/)
     expect(text).toMatch(/1 request/)
-    // The figure is a floor, and the wallet is the authority — the output has
-    // to say so rather than read like an invoice.
-    expect(text).toMatch(/floor, not a settled invoice/)
+    // The figure is a floor and the wallet is the authority, and the output
+    // has to say so — including WHY it is a floor, since settlement is priced
+    // on max_tokens rather than the tokens actually produced.
+    expect(text).toMatch(/A floor, not an invoice/)
+    expect(text).toMatch(/max_tokens/)
   })
 })
 

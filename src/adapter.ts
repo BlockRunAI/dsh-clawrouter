@@ -158,17 +158,12 @@ export class BlockrunAdapter extends LlmAdapter {
         // Checked again after the await: a turn cancelled while this read was
         // outstanding must not emit the chunk it was waiting on.
         throwIfAborted(options.signal)
-        const chunks = translator.accept(next.value)
-        for (const chunk of chunks) {
-          // Counted on the provider's own usage record, so a call that never
-          // reported one is never guessed at.
-          if (chunk.type === 'usage') {
-            this.#options.meter?.record(model, chunk.usage, this.#options.catalog.rates.get(model))
-          }
-        }
-        yield * chunks
+        yield * this.#metered(model, translator.accept(next.value))
       }
-      yield * translator.end()
+      // The terminal flush is metered too, and it is the one that counts: the
+      // translator BUFFERS usage and emits it from `end()`, so watching only
+      // the per-chunk output recorded nothing at all.
+      yield * this.#metered(model, translator.end())
     } finally {
       // Terminating the generator releases the SDK's reader. The in-flight
       // HTTP request is not itself cancellable until `BlockrunClient.stream`
@@ -179,6 +174,25 @@ export class BlockrunAdapter extends LlmAdapter {
         // on its failure; the caller's own abort or error is the real outcome.
       })
     }
+  }
+
+  /**
+   * Pass chunks through, counting any usage record among them.
+   *
+   * Counted from the provider's own report, so a call that never sent one is
+   * never guessed at — it simply does not appear in the total.
+   * @param model - the model that served the call.
+   * @param chunks - chunks about to be yielded.
+   * @returns the same chunks, unchanged.
+   */
+  #metered(model: string, chunks: readonly StreamChunk[]): readonly StreamChunk[] {
+    const meter = this.#options.meter
+    if (meter !== undefined) {
+      for (const chunk of chunks) {
+        if (chunk.type === 'usage') meter.record(model, chunk.usage, this.#options.catalog.rates.get(model))
+      }
+    }
+    return chunks
   }
 
   /**

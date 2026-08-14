@@ -1,11 +1,18 @@
 /**
  * What this route has spent, computed from the same numbers BlockRun bills on.
  *
- * The gateway charges provider token cost plus a flat per-request fee, and it
- * does NOT price prompt-cache hits differently — so multiplying reported tokens
- * by the catalog's published rates is the billing formula rather than an
- * approximation of it. The one thing this cannot see is a request that failed
- * after payment settled; those are not counted, so the figure is a floor.
+ * This is a FLOOR, and deliberately described as one everywhere it is shown.
+ *
+ * What settles on chain is the signed 402 quote, and the gateway computes that
+ * quote from the estimated input plus `max_tokens` — the cap, not the tokens
+ * the model went on to produce. A request capped at 4096 that answers in 50 is
+ * charged for far more than it used. This counts actual reported usage, so it
+ * reads low by exactly that gap, and it cannot see a request that failed after
+ * its payment settled either.
+ *
+ * It is still worth showing: the flat fee dominates small calls, the token
+ * rates are the published ones, and a floor with its limits stated beats an
+ * agent spending a wallet with no figure anywhere.
  *
  * It lives in memory for the life of the process. A durable per-session figure
  * would need a session event, which a plugin outside the harness repository
@@ -145,6 +152,9 @@ export function renderSpend(summary: SpendSummary): string {
   if (summary.unpricedCalls > 0) {
     lines.push('', `${summary.unpricedCalls} call(s) ran on a model the catalog publishes no rate for; their token cost is not included.`)
   }
-  lines.push('', 'Computed from reported usage and published rates, counting only calls that completed — a floor, not a settled invoice. Your wallet balance is the authority.')
+  lines.push(
+    '',
+    'A floor, not an invoice: what settles is the signed 402 quote, which is priced on max_tokens rather than the tokens actually produced, and only completed calls are counted. Your wallet balance is the authority.',
+  )
   return lines.join('\n')
 }

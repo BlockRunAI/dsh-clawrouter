@@ -9,6 +9,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from '../src/adapter.ts'
 import { BlockrunCatalog } from '../src/catalog.ts'
+import { SpendMeter } from '../src/spend.ts'
 
 /** Valid-shaped key; no payment happens, so it is never used to sign anything. */
 const DUMMY_KEY = `0x${'1'.repeat(64)}`
@@ -54,12 +55,13 @@ afterEach(async () => {
 })
 
 /** An adapter pointed at the local server. */
-function adapter(auxiliaryModel?: string): BlockrunAdapter {
+function adapter(auxiliaryModel?: string, meter?: SpendMeter): BlockrunAdapter {
   return new BlockrunAdapter({
     provider: 'blockrun',
     connection: () => ({ apiUrl, timeoutMs: 10_000, ...auxiliaryModel === undefined ? {} : { auxiliaryModel } }),
     resolveWalletKey: () => Promise.resolve(DUMMY_KEY),
     catalog: new BlockrunCatalog('blockrun', `${apiUrl}/v1`),
+    ...meter === undefined ? {} : { meter },
   })
 }
 
@@ -116,5 +118,35 @@ describe('what reaches the wire', () => {
     // The substituted model is validated like any other, so a typo in
     // auxiliaryModel fails loudly instead of breaking compaction at runtime.
     expect(bodies).toHaveLength(0)
+  })
+})
+
+describe('spend metering through a real request', () => {
+  it('counts a completed call, its tokens and its fee', async () => {
+    const meter = new SpendMeter(0.001)
+    await run(adapter(undefined, meter))
+
+    // Asserted through the streaming path rather than by calling the meter
+    // directly: the translator BUFFERS usage and emits it from end(), so an
+    // adapter that watched only per-chunk output counted nothing while every
+    // unit test of the meter itself still passed.
+    const summary = meter.summary()
+    expect(summary.calls).toBe(1)
+    expect(summary.inputTokens).toBe(10)
+    expect(summary.outputTokens).toBe(2)
+    expect(summary.requestFeesUsd).toBeCloseTo(0.001, 10)
+  })
+
+  it('prices it from the catalog the gateway served', async () => {
+    const meter = new SpendMeter(0)
+    await run(adapter(undefined, meter))
+    // The stub catalog prices neither model, so the call is counted and
+    // reported as unpriced rather than silently valued at zero.
+    expect(meter.summary().unpricedCalls).toBe(1)
+  })
+
+  it('counts nothing when no meter is attached', async () => {
+    await run(adapter())
+    expect(bodies).toHaveLength(1)
   })
 })
