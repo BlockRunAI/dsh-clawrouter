@@ -4,7 +4,15 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.4.2 — 2026-08-14
+## 0.4.3 — 2026-08-14
+
+### Added
+- **A from-zero Docker smoke test** (`npm run test:docker`). Installs the published package from npm into a container that has never seen this project and asserts eleven things: that the profile composes, that the gate ships disarmed, that `lib/` is in the tarball and `src/` is not, and that the npm description's model count matches the README's. Passes on `linux/arm64` and `linux/amd64`. Needs no wallet and no key.
+
+### Documented
+- **`dsh` needs `python3`, `make` and `g++` on a slim Node image.** Its `node-pty` dependency has no prebuild for `node:22-slim` on either architecture, so npm rebuilds from source and the install dies at `Could not find any Python installation to use` — a message that names neither dsh nor this plugin. Found by running the install in a clean container rather than reasoning about it; it had always worked on a developer machine.
+
+
 
 ### Fixed
 - **The install's six `✕ missing peer` lines are now explained before a user meets them.** Walked the first-run path on a clean `DSH_HOME` against the published package: `dsh plugin add` prints six missing-peer errors, and the profile then composes correctly and lists both rows under `--dump-config`. The warnings are cosmetic — the harness supplies those packages at runtime, and every first-party bundle declares its peers the same way — but six red marks during the very first command read as a failed install.

@@ -245,6 +245,7 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 npm test          # 185 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
 npm run sync:models  # 从实时 catalog 刷新两份 README 里的模型数量
+npm run test:docker  # 在干净容器里安装**已发布**的包，验证它能组装起来
 ```
 
 用**本地 link** 开发时（`dsh plugin add /path/to/dsh-clawrouter`），本包的 **devDependencies** 会被带进 profile，于是出现两份 `@deepseek-ai/dsh-llm`。跨这两份做 `instanceof LlmError` 会失败，harness 就会把所有失败都显示成 `UNKNOWN`，而不是真实错误码。要验证错误码，请用 `npm pack` 出来的 tarball 安装，而不是 link。

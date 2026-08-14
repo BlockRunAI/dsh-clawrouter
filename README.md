@@ -247,6 +247,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 npm test          # 185 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 npm run sync:models  # refresh the model count in both READMEs from the live catalog
+npm run test:docker  # install the PUBLISHED package in a clean container and assert it composes
 ```
 
 Developing against a linked checkout (`dsh plugin add /path/to/dsh-clawrouter`) pulls this package's **devDependencies** into the profile, giving a second copy of `@deepseek-ai/dsh-llm`. `instanceof LlmError` then fails across the two copies and the harness reports every failure as `UNKNOWN` instead of its real code. Test error codes from a packed tarball (`npm pack`) rather than a link.

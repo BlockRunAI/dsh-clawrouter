@@ -1,6 +1,6 @@
 {
   "name": "dsh-clawrouter",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "A second brain for your DeepSeek Harness agent \u2014 strong-model review before risky tool calls, plus 67 models from one wallet. No accounts, no API keys.",
   "type": "module",
   "main": "lib/index.js",
@@ -48,6 +48,7 @@
     "sync:models": "tsx scripts/sync-model-count.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
+    "test:docker": "docker build -q -t dsh-clawrouter-smoke test/docker && docker run --rm dsh-clawrouter-smoke",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
