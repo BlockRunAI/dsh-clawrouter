@@ -18,6 +18,9 @@ import type { BlockrunCatalogModel } from './types.ts'
 /** How long a successful catalog read is reused before the next fetch. */
 export const CATALOG_TTL_MS = 300_000
 
+/** Deadline for one catalog request; it is shared, so it cannot wait forever. */
+export const CATALOG_FETCH_TIMEOUT_MS = 15_000
+
 /**
  * Capacity assumed for a model the catalog does not size. A guess by
  * construction: BlockRun serves models whose context the listing sometimes
@@ -75,18 +78,46 @@ export class BlockrunCatalog {
   async list(signal?: AbortSignal): Promise<readonly LlmResolvedModelInfo[]> {
     const cached = this.#cache
     if (cached !== undefined && this.now() - cached.fetchedAt < CATALOG_TTL_MS) return cached.models
-    this.#inFlight ??= this.#refresh(signal).finally(() => {
+    // The shared fetch deliberately carries NO caller signal. One request is
+    // reused by every concurrent caller, so binding it to whichever caller
+    // happened to arrive first would let that caller's cancellation fail
+    // everyone else's read. Its own deadline bounds it instead; a caller that
+    // cancels stops waiting below without disturbing the request.
+    this.#inFlight ??= this.#refresh().finally(() => {
       this.#inFlight = undefined
     })
+    const inFlight = this.#inFlight
     try {
-      return await this.#inFlight
+      return await (signal === undefined ? inFlight : this.#raceAbort(inFlight, signal))
     } catch (error) {
+      // A caller that cancelled gets its cancellation, never a stale answer
+      // dressed up as a fresh one.
+      if (signal?.aborted === true) throw error
       // Serve the previous catalog through a transient gateway failure: a
       // selector that listed 70 models a minute ago must not empty because one
       // refresh timed out. With nothing cached there is no honest answer, so
       // the failure surfaces.
       if (cached !== undefined) return cached.models
       throw error
+    }
+  }
+
+  /** Stop waiting on `pending` when `signal` aborts, leaving `pending` itself untouched. */
+  async #raceAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+    if (signal.aborted) throw new LlmError('BlockRun catalog read aborted by caller', 'ABORTED', { cause: signal.reason })
+    let onAbort: (() => void) | undefined
+    try {
+      return await Promise.race([
+        pending,
+        new Promise<never>((_resolve, reject) => {
+          onAbort = (): void => {
+            reject(new LlmError('BlockRun catalog read aborted by caller', 'ABORTED', { cause: signal.reason }))
+          }
+          signal.addEventListener('abort', onAbort, { once: true })
+        }),
+      ])
+    } finally {
+      if (onAbort !== undefined) signal.removeEventListener('abort', onAbort)
     }
   }
 
@@ -109,14 +140,15 @@ export class BlockrunCatalog {
     return found
   }
 
-  async #refresh(signal?: AbortSignal): Promise<readonly LlmResolvedModelInfo[]> {
+  async #refresh(): Promise<readonly LlmResolvedModelInfo[]> {
     const url = `${this.baseURL.replace(/\/$/, '')}/models`
+    // This request answers every concurrent caller, so it owns its own
+    // deadline: without one, a hung gateway would park the shared promise
+    // indefinitely and every later caller would join the same stall.
+    const deadline = AbortSignal.timeout(CATALOG_FETCH_TIMEOUT_MS)
     let response: Response
     try {
-      response = await fetch(url, {
-        headers: { accept: 'application/json' },
-        ...signal === undefined ? {} : { signal },
-      })
+      response = await fetch(url, { headers: { accept: 'application/json' }, signal: deadline })
     } catch (error) {
       throw new LlmError(`BlockRun model catalog request failed (${url})`, 'TRANSPORT', { cause: error })
     }

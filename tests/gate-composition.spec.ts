@@ -98,8 +98,12 @@ function agent(ctx: Context): Agent {
   return value
 }
 
-/** Boot a real cordis.yml carrying the given review config lines. */
-async function boot(configLines: readonly string[]): Promise<Context> {
+/**
+ * Boot a real cordis.yml carrying the given review config lines.
+ * @param configLines - YAML lines nested under the plugin's `config:` key.
+ * @param withCommands - whether the composition provides a command surface.
+ */
+async function boot(configLines: readonly string[], withCommands = true): Promise<Context> {
   root = await mkdtemp(join(tmpdir(), 'dsh-clawrouter-gate-'))
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
@@ -107,7 +111,7 @@ async function boot(configLines: readonly string[]): Promise<Context> {
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
     "- name: '@deepseek-ai/dsh-llm'",
-    "- name: '@deepseek-ai/dsh-commands'",
+    ...withCommands ? ["- name: '@deepseek-ai/dsh-commands'"] : [],
     "- name: 'clawrouter-test-fixture'",
     "- name: 'dsh-clawrouter/review'",
     '  config:',
@@ -229,6 +233,20 @@ describe('review gate, booted through the real Loader', () => {
     const ctx = await boot(ENABLED)
     const owner = agent(ctx)
     expect(ctx.commands.list(owner).map(c => c.name)).toContain('review')
+  }, 30_000)
+
+  it('still guards a composition that has no command surface', async () => {
+    behavior = { kind: 'reply', text: '{"ruling":"dangerous","reason":"This erases your home directory."}' }
+    ran.length = 0
+    const ctx = await boot(ENABLED, false)
+
+    // `commands` is an optional UI seam. A safety gate that failed to mount
+    // without it would silently stop protecting exactly the headless and
+    // automation compositions that most need it.
+    expect(ctx.get('commands')).toBeUndefined()
+    const result = await callBash(ctx, 'rm -rf ~')
+    expect(result.isError).toBe(true)
+    expect(ran).toEqual([])
   }, 30_000)
 
   it('unregisters everything when the fiber is disposed', async () => {
