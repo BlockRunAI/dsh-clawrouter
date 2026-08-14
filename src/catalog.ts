@@ -261,21 +261,6 @@ function positive(value: number | undefined): number | undefined {
   return Math.floor(value)
 }
 
-/**
- * Published per-million rates for one model, when the catalog states them.
- *
- * The harness descriptor has nowhere to carry price, so rates ride beside the
- * cache rather than inside `LlmResolvedModelInfo`. Reads whatever the last
- * successful catalog fetch held; a model the catalog does not price answers
- * undefined rather than zero, so an unpriced call can be reported as unpriced
- * instead of counted as free.
- * @param model - BlockRun model id.
- * @returns its rates, or undefined.
- */
-export function ratesFor(catalog: BlockrunCatalog, model: string): ModelRates | undefined {
-  return catalog.rates.get(model)
-}
-
 /** Narrow a resolved descriptor to the listing projection. */
 export function toModelInfo(model: LlmResolvedModelInfo): LlmModelInfo {
   const { provider, id, name, description, inputModalities } = model
