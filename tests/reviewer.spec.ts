@@ -108,3 +108,25 @@ describe('parseVerdict', () => {
     expect(parseVerdict('{not json} then {"ruling":"safe","reason":"ok"}').ruling).toBe('safe')
   })
 })
+
+describe('parseVerdict — degenerate input', () => {
+  it('stays fast on a response whose braces never close', () => {
+    // Every `{` starts a scan that walks forward looking for balance. Without a
+    // span bound, a response like this is quadratic in its length — produced by
+    // a model, parsed inside the tool-execution path.
+    const hostile = '{'.repeat(200_000)
+    const started = performance.now()
+    expect(parseVerdict(hostile).ruling).toBe('uncertain')
+    expect(performance.now() - started).toBeLessThan(1_000)
+  })
+
+  it('still finds a verdict that follows a long unclosed brace run', () => {
+    const text = `${'{'.repeat(5_000)}\n{"ruling":"dangerous","reason":"nope"}`
+    expect(parseVerdict(text).ruling).toBe('dangerous')
+  })
+
+  it('names an empty response as such, so the cause points at reviewerModel', () => {
+    expect(parseVerdict('   ').reason).toMatch(/no visible text/i)
+    expect(parseVerdict('I think it is fine.').reason).toMatch(/did not return a readable verdict/i)
+  })
+})

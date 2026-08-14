@@ -45,6 +45,13 @@ export const DEFAULT_REVIEWER_MODEL = 'anthropic/claude-opus-5'
 /** How long one review may take before the gate stops waiting. */
 export const DEFAULT_REVIEW_TIMEOUT_MS = 30_000
 
+/**
+ * How much reviewer output is read before the gate stops listening. A verdict
+ * is one small JSON object; this bound exists so a runaway model cannot grow
+ * a buffer without limit from inside the tool-execution path.
+ */
+export const MAX_REVIEWER_RESPONSE_CHARS = 16_384
+
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'blockrun-review'
 
@@ -131,8 +138,15 @@ export function apply(ctx: Context, config: Config): void {
     }
     let text = ''
     for await (const chunk of ctx.llm.stream(request)) {
-      if (chunk.type === 'text-delta') text += chunk.text
-      else if (chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')) {
+      if (chunk.type === 'text-delta') {
+        text += chunk.text
+        // A verdict is two short fields. Anything past this is a model that
+        // ran away, and this runs inside the tool-execution path — so stop
+        // reading rather than grow without limit. Leaving the loop closes the
+        // stream; whatever arrived is still parsed, and an unreadable result
+        // escalates to a human like any other.
+        if (text.length >= MAX_REVIEWER_RESPONSE_CHARS) break
+      } else if (chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')) {
         throw new Error(`reviewer stream ended: ${chunk.reason.kind}`)
       }
     }

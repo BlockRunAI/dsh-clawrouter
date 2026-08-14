@@ -173,18 +173,35 @@ export function parseVerdict(text: string): ReviewVerdict {
   if (candidates.length !== 1) {
     return {
       ruling: 'uncertain',
-      reason: candidates.length === 0
-        ? 'The safety reviewer did not return a readable verdict.'
-        : 'The safety reviewer returned more than one verdict.',
+      reason: candidates.length > 1
+        ? 'The safety reviewer returned more than one verdict.'
+        // Naming the empty case separately points at the actual cause: a model
+        // that answers only in a reasoning channel produces no visible text
+        // here, and "no readable verdict" would send someone hunting the
+        // prompt instead of their reviewerModel choice.
+        : text.trim().length === 0
+          ? 'The safety reviewer returned no visible text; check that reviewerModel emits normal output.'
+          : 'The safety reviewer did not return a readable verdict.',
     }
   }
   return candidates[0]!
 }
 
-/** Every balanced `{...}` span in `text` that parses as an object carrying a known ruling. */
+/**
+ * Every object in `text` that parses as a verdict.
+ *
+ * Candidates are found by searching for the `ruling` key rather than by trying
+ * every `{`. A verdict must contain that key, so this looks at a handful of
+ * positions in a real response and none at all in a degenerate one — where
+ * scanning from every brace would be quadratic in the response length, on a
+ * value a model produced and reachable from the tool-execution path.
+ */
 function collectVerdicts(text: string): ReviewVerdict[] {
   const found: ReviewVerdict[] = []
-  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+  const KEY = '"ruling"'
+  for (let at = text.indexOf(KEY); at !== -1; at = text.indexOf(KEY, at + KEY.length)) {
+    const start = openingBraceBefore(text, at)
+    if (start === undefined) continue
     const parsed = parseObjectAt(text, start)
     if (parsed === undefined) continue
     const ruling = parsed['ruling']
@@ -200,10 +217,31 @@ function collectVerdicts(text: string): ReviewVerdict[] {
   return found
 }
 
+/**
+ * Longest span one candidate verdict object may occupy.
+ *
+ * The scan below walks forward from every `{` until its braces balance. On a
+ * response whose braces never close, each scan would run to the end of the
+ * text — quadratic in its length, on a value produced by a model and reachable
+ * from the tool-execution path. A verdict is two short fields, so a bound this
+ * generous excludes nothing real while making the scan linear.
+ */
+const MAX_VERDICT_SPAN = 4_096
+
+/** The nearest `{` at or before `at`, within one verdict's span; undefined if none. */
+function openingBraceBefore(text: string, at: number): number | undefined {
+  const floor = Math.max(0, at - MAX_VERDICT_SPAN)
+  for (let index = at; index >= floor; index--) {
+    if (text[index] === '{') return index
+  }
+  return undefined
+}
+
 /** The balanced `{...}` span beginning at `start`, when it parses as a JSON object. */
 function parseObjectAt(text: string, start: number): Record<string, unknown> | undefined {
   let depth = 0
-  for (let index = start; index < text.length; index++) {
+  const limit = Math.min(text.length, start + MAX_VERDICT_SPAN)
+  for (let index = start; index < limit; index++) {
     const char = text[index]
     if (char === '{') depth++
     else if (char === '}') {
