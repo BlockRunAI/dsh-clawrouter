@@ -167,7 +167,12 @@ export class BlockrunAdapter extends LlmAdapter {
     let known: readonly LlmModelInfo[]
     try {
       known = await this.#options.catalog.list(signal)
-    } catch {
+    } catch (error) {
+      // A caller that cancelled during the catalog read is cancelled, not
+      // unverifiable. Swallowing it here would leave the abort to be noticed
+      // one step later, which is a thing to rely on rather than a thing to
+      // read.
+      if (signal?.aborted === true) throw asLlmError(error)
       return
     }
     if (known.length === 0 || known.some(entry => entry.id === model)) return
@@ -184,14 +189,48 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw new LlmError('BlockRun request aborted by caller', 'ABORTED', { cause: signal.reason })
 }
 
-/** Normalize an SDK or transport failure into a stable harness error code. */
+/**
+ * Map an HTTP status to a stable harness error code.
+ *
+ * The code decides retry behaviour: the harness retries `RATE_LIMIT`,
+ * `SERVER`, `TIMEOUT`, and `TRANSPORT`, and fails fast on everything else.
+ * Reporting a payment or auth failure as a transport blip would retry a
+ * request that cannot succeed until a human funds a wallet or fixes a key.
+ * @param status - status of a non-2xx gateway response.
+ * @returns the normalized harness error code.
+ */
+export function httpErrorCode(status: number): string {
+  if (status === 401 || status === 403) return 'AUTH'
+  // x402's own status. Retrying cannot help: the wallet is short, or the
+  // signed authorization was refused.
+  if (status === 402) return 'PAYMENT_REQUIRED'
+  if (status === 429) return 'RATE_LIMIT'
+  if (status === 400) return 'INVALID_REQUEST'
+  if (status >= 500) return 'SERVER'
+  return `HTTP_${status}`
+}
+
+/**
+ * Normalize an SDK or transport failure into a stable harness error code.
+ *
+ * `@blockrun/llm` reports HTTP status as `statusCode`; `status` is accepted
+ * too so an error from any other layer still carries its status through.
+ */
 function asLlmError(error: unknown): LlmError {
   if (error instanceof LlmError) return error
   const message = error instanceof Error ? error.message : String(error)
-  const status = (error as { status?: unknown })?.status
-  const code = typeof status === 'number' && status === 402 ? 'PAYMENT_REQUIRED' : 'TRANSPORT'
+  const raw = (error as { statusCode?: unknown; status?: unknown })
+  const candidate = typeof raw?.statusCode === 'number' ? raw.statusCode : raw?.status
+  const status = typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 100 && candidate <= 599
+    ? candidate
+    : undefined
+  // A payment the SDK rejected before any request carries no status of its own.
+  const paymentRejected = error instanceof Error && error.name === 'PaymentError'
+  const code = status !== undefined
+    ? httpErrorCode(status)
+    : paymentRejected ? 'PAYMENT_REQUIRED' : 'TRANSPORT'
   return new LlmError(`BlockRun request failed: ${message}`, code, {
     cause: error,
-    ...typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? { status } : {},
+    ...status === undefined ? {} : { status },
   })
 }
