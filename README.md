@@ -107,13 +107,16 @@ Measured, because this is the question that decides whether you keep it enabled:
 
 | | |
 |---|---|
-| Fires on ordinary work | **never** — 0 of 32 commands from a real session (`ls`, `npm test`, `git commit`, `git push origin feature/x`, `rm build/output.txt`, `chmod 644`, …) |
-| Misses dangerous work | **none** of the destructive set |
+| Fires on ordinary work | **never** — 0 of 59, including commands that merely *mention* a destructive one (`grep -rn "rm -rf" docs/`, `echo "DROP TABLE" >> notes.md`) |
+| Misses dangerous work | **none** of 39, across git, containers, clusters, cloud storage, databases, and host state |
+| Survives evasion | `\rm -rf /`, `command rm`, `env rm`, `eval "rm -rf $DIR"`, `bash -c "…"`, `\| xargs rm`, and heredocs piped into a shell |
 | Cost when it does fire | **$0.0048** on `claude-opus-5`, $0.002 on cheaper reviewers |
 | Latency when it does fire | ~3s |
 | What the reviewer sees | ~356 tokens — the flagged call, not your conversation |
 
-So during normal work it is invisible: no latency, no cost, no prompts. It bills roughly half a cent on the rare command that deserves a second opinion. A test asserts that zero-of-32 figure, so a future rule that starts flagging `npm test` fails CI rather than your session.
+So during normal work it is invisible: no latency, no cost, no prompts. It bills roughly half a cent on the rare command that deserves a second opinion. Both corpora are tests, so a rule that starts flagging `npm test` — or stops flagging `kubectl delete namespace` — fails CI rather than your session.
+
+**Recall is the ceiling on everything above:** a command the matcher never flags is a command the reviewer never sees. An earlier version of this table claimed nothing was missed, measured against the six commands the rules had been written for. Against the 39 above, those same rules caught **one**. The corpus exists so that number can never again be taken on faith.
 
 ### 2. `/spend`
 

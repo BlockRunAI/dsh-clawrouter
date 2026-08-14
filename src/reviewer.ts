@@ -40,11 +40,28 @@ export interface RiskRule {
  * a reputation for crying wolf, and a user switches it off — at which point it
  * protects nobody.
  */
-const CMD = String.raw`(?:^|[;&|\n(])\s*(?:sudo\s+)?`
+/**
+ * Prefixes that run a command without being one.
+ *
+ * `rm -rf /` anchored to command position is trivially evaded by writing
+ * `command rm -rf /`, `env rm -rf /`, `\rm -rf /`, or `bash -c "rm -rf /"`.
+ * Measured before this existed: every one of those slipped through while the
+ * bare form was caught, which is the worst possible shape for a safety filter
+ * — it stops the honest spelling and passes the deliberate one.
+ */
+const WRAPPERS = String.raw`(?:\\|(?:command|env|exec|nohup|time|nice|eval|xargs)\s+|(?:ba|z|k|d)?sh\s+-c\s+|sudo\s+(?:-\S+\s+)*|["'])*`
 
-/** Build a command-position rule from a fragment that begins at the command name. */
-function commandRule(name: string, fragment: string): RiskRule {
-  return { name, tools: [], pattern: new RegExp(CMD + fragment) }
+const CMD = String.raw`(?:^|[;&|\n(])\s*` + WRAPPERS
+
+/**
+ * Build a command-position rule from a fragment that begins at the command name.
+ *
+ * @param name - rule name, reported to the model and the user.
+ * @param fragment - pattern starting at the command word.
+ * @param flags - extra RegExp flags; `i` for rules matching SQL, which is conventionally uppercase but not required to be.
+ */
+function commandRule(name: string, fragment: string, flags = ''): RiskRule {
+  return { name, tools: [], pattern: new RegExp(CMD + fragment, flags) }
 }
 
 export const DEFAULT_RISK_RULES: readonly RiskRule[] = [
@@ -68,7 +85,7 @@ export const DEFAULT_RISK_RULES: readonly RiskRule[] = [
   commandRule('infra-destroy', String.raw`terraform\s+destroy\b`),
   // Irreversible and outward-facing: a registry will not let you take it back,
   // and an accidental publish is a release other people install.
-  commandRule('package-publish', String.raw`(?:npm|pnpm|yarn)\s+publish\b`),
+  commandRule('package-publish', String.raw`(?:npm|pnpm|yarn)\s+publish\b(?![^;&|\n]*--dry-run\b)`),
   // Deliberately last, and NOT built by `commandRule` — that helper's `sudo`
   // prefix is optional, so reusing it here would match every command.
   { name: 'privilege-escalation', tools: [], pattern: /(?:^|[;&|\n(])\s*sudo\s+\S/ },
@@ -76,6 +93,46 @@ export const DEFAULT_RISK_RULES: readonly RiskRule[] = [
   // read from, and it is reachable through any path prefix — `/home/me/.ssh/…`
   // must match as surely as `~/.ssh/…`.
   { name: 'credential-path', tools: [], pattern: /(^|[\s'"=:~\/])(\.ssh|\.aws|\.gnupg)\/|\/etc\/(passwd|shadow|sudoers)\b/ },
+
+  // --- Destroying work that git can otherwise recover -------------------
+  // `-D` discards unmerged commits; `-d` refuses to and stays unflagged.
+  commandRule('branch-force-delete', String.raw`git\s+branch\b[^;&|\n]*\s-D(?:\s|$)`),
+  commandRule('remote-branch-delete', String.raw`git\s+push\b[^;&|\n]*(?:--delete\b|\s:\S)`),
+  commandRule('stash-discard', String.raw`git\s+stash\s+(?:clear|drop)\b`),
+  // The reflog is what makes most git mistakes survivable; expiring it, or
+  // pruning immediately, is what makes them permanent.
+  commandRule('history-destroy', String.raw`git\s+(?:filter-branch\b|reflog\s+expire\b|gc\b[^;&|\n]*--prune)`),
+
+  // --- Destroying state outside the repository --------------------------
+  commandRule('container-data-delete', String.raw`docker\s+(?:system\s+prune|volume\s+(?:rm|prune)|image\s+prune)\b`),
+  commandRule('cluster-delete', String.raw`(?:kubectl\s+delete|helm\s+(?:uninstall|delete))\b`),
+  commandRule('cloud-storage-delete', String.raw`(?:aws\s+s3\s+(?:rm|rb)|gcloud\s+storage\s+rm|az\s+storage\s+\S+\s+delete)\b`),
+  commandRule('repository-delete', String.raw`gh\s+repo\s+delete\b`),
+  // Anchored to a database client, so prose mentioning DROP TABLE — a note, a
+  // migration file, a commit message — is not a destructive command.
+  commandRule(
+    'database-destroy',
+    String.raw`(?:psql|mysql|mariadb|mongo|mongosh|sqlite3|redis-cli)\b[^;&|\n]*`
+      + String.raw`(?:DROP\s+(?:DATABASE|TABLE|SCHEMA)|TRUNCATE\s+TABLE|dropDatabase|FLUSH(?:ALL|DB))\b`,
+    'i',
+  ),
+
+  // --- Host and infrastructure state ------------------------------------
+  commandRule('scheduled-jobs-delete', String.raw`crontab\s+(?:-\S+\s+)*-r\b`),
+  commandRule('firewall-disable', String.raw`(?:iptables\s+-F|ufw\s+disable|pfctl\s+-d)\b`),
+  commandRule('service-stop', String.raw`(?:systemctl\s+(?:stop|disable|mask)|service\s+\S+\s+stop)\b`),
+  commandRule('disk-erase', String.raw`diskutil\s+(?:eraseDisk|eraseVolume|partitionDisk)\b`),
+  commandRule('mirror-delete', String.raw`rsync\b[^;&|\n]*--delete\b`),
+  commandRule('package-purge', String.raw`(?:apt-get|apt|dnf|yum)\s+(?:purge\b|remove\b[^;&|\n]*--purge\b)`),
+  commandRule('package-unpublish', String.raw`(?:npm|pnpm|yarn)\s+unpublish\b`),
+  commandRule('infra-apply-unattended', String.raw`terraform\s+apply\b[^;&|\n]*-auto-approve\b`),
+  commandRule('secure-erase', String.raw`(?:shred|srm)\s+-`),
+  // Truncating a system path. A redirect into the workspace is ordinary work.
+  { name: 'system-truncate', tools: [], pattern: />\s*\/(?:etc|usr|var|bin|sbin|boot|lib)\// },
+  commandRule('permission-strip', String.raw`chmod\s+(?:-\S+\s+)*(?:000|a-rwx)\b`),
+  // `rm` reached through a pipe carries no flags of its own, so the recursive
+  // rules above never see it.
+  { name: 'pipe-to-delete', tools: [], pattern: /\|\s*(?:sudo\s+)?xargs\s+(?:-\S+\s+)*rm\b/ },
 ]
 
 /**
@@ -115,6 +172,42 @@ export function matchRisk(
  * happens when something executes it, and that execution is a separate call
  * whose command field this scan still reads.
  */
+/**
+ * A shell that would execute a heredoc body rather than store it.
+ *
+ * `cat << EOF > script.sh` writes a file. `cat << EOF | bash` and
+ * `bash << EOF` run the body immediately, and so does writing a script and
+ * invoking it in the same command. Stripping the body in those cases hands
+ * anyone a four-character bypass for every rule in this file.
+ */
+const SHELL_CONSUMER = /(?:^|[;&|\n])\s*(?:sudo\s+)?(?:ba|z|k|d)?sh\b|\|\s*(?:sudo\s+)?(?:ba|z|k|d)?sh\b/
+
+/**
+ * Remove heredoc bodies from a shell command that only writes them.
+ *
+ * `cat > cleanup.sh << EOF` followed by `rm -rf /tmp/build` writes a file; it
+ * does not delete anything. This is the same rule {@link BODY_FIELDS} applies
+ * to a write tool's `content`, and it has to hold here too or the gate flags
+ * every script a project writes about its own cleanup — the surest way to earn
+ * a reputation for crying wolf.
+ *
+ * Nothing is stripped when the command also invokes a shell, because then the
+ * body is not data. Measured before that check existed: `cat << EOF | bash`
+ * carrying `rm -rf /` passed the gate untouched.
+ *
+ * @param command - the shell command as the model produced it.
+ * @returns the command with every written-only heredoc body removed.
+ */
+function stripHeredocs(command: string): string {
+  if (SHELL_CONSUMER.test(command)) return command
+  // No `m` flag: with it, `$` matches the end of the FIRST line, so the lazy
+  // body matched nothing and every heredoc survived intact.
+  // Only a TERMINATED heredoc is stripped. The `|$` fallback this replaced let
+  // an unterminated one swallow the rest of the command: `cat << EOF` with no
+  // closing EOF removed every command after it, `rm -rf /` included.
+  return command.replace(/<<-?\s*(['"]?)(\w+)\1[\s\S]*?\n\2(?:\n|$)/g, '<<$2')
+}
+
 const BODY_FIELDS: ReadonlySet<string> = new Set([
   'content',
   'contents',
@@ -142,7 +235,7 @@ function renderArguments(args: unknown): string {
   const parts: string[] = []
   for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
     if (BODY_FIELDS.has(key)) continue
-    if (typeof value === 'string') parts.push(value)
+    if (typeof value === 'string') parts.push(stripHeredocs(value))
     else if (Array.isArray(value)) parts.push(value.filter(item => typeof item === 'string').join(' '))
   }
   return parts.join('\n')

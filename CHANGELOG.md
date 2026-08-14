@@ -4,7 +4,18 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.6.0 — 2026-08-14
+## 0.7.0 — 2026-08-14
+
+### Fixed
+- **The gate caught 1 of 39 realistic destructive commands.** Recall is the ceiling on everything this plugin claims — a command the matcher never flags is one the reviewer never sees — and it had never been measured against anything but the commands the rules were written for. Twenty-two rules added, covering branch and remote-branch deletion, stash and reflog destruction, container volumes, `kubectl delete`, `helm uninstall`, S3 removal, `gh repo delete`, `DROP`/`TRUNCATE`/`FLUSHALL` through a database client, `crontab -r`, firewall flushes, service stops, disk erase, `rsync --delete`, package purge and unpublish, unattended `terraform apply`, `shred`, system-path truncation, and permission stripping. Now 39 of 39, with 0 false positives across 59 ordinary commands.
+- **Command-position anchoring was trivially evadable.** `rm -rf /` was flagged while `\rm -rf /`, `command rm -rf /`, `env rm -rf /`, `eval "rm -rf $DIR"`, `bash -c "rm -rf /"` and `… | xargs rm` all passed — the worst shape for a safety filter, stopping the honest spelling and passing the deliberate one.
+- **`npm publish --dry-run` no longer counts as publishing.**
+
+### Added
+- **Heredoc bodies are treated as data**, so `cat > cleanup.sh << EOF` carrying `rm -rf /tmp/build` stays quiet — but only when the body is written rather than run. Piping a heredoc into a shell, feeding one to `bash` on stdin, or writing a script and invoking it in the same command all keep the body in scope; each was a working bypass first. An unterminated heredoc is never stripped, since the strip would otherwise swallow every command after it.
+- **A permanent risk corpus** (`tests/risk-corpus.spec.ts`): 39 destructive commands, 59 ordinary ones including commands that merely mention a destructive one, and 6 heredoc bypasses.
+
+
 
 ### Fixed
 - **An upstream error the gateway relays as assistant text is now a failure, not an answer.** Measured: an image request to `anthropic/claude-sonnet-5` or `claude-opus-5` returns HTTP 200 and streams `[Error: 400 {"message":"Could not process image"}]` as the model's reply. The harness sees an ordinary successful turn, the call is paid for, and the agent acts on the error string as though the model wrote it. Detection is anchored to the whole message, so an answer that merely mentions an error, or a turn that also called a tool, is untouched. The relayed status maps exactly as it would have if it had arrived as a real one.

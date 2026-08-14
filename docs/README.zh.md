@@ -105,8 +105,9 @@ dsh plugin --profile web add dsh-clawrouter
 
 | | |
 |---|---|
-| 日常操作触发率 | **0 次** —— 真实会话里 32 条命令一条没触发（`ls`、`npm test`、`git commit`、`git push origin feature/x`、`rm build/output.txt`、`chmod 644` …） |
-| 危险命令漏掉 | **一条都没漏** |
+| 日常操作触发率 | **0/59** —— 包含那些只是**提到**危险命令的（`grep -rn "rm -rf" docs/`、`echo "DROP TABLE" >> notes.md`） |
+| 危险命令漏掉 | **0/39** —— 覆盖 git、容器、集群、云存储、数据库、主机状态 |
+| 抗绕过 | `\rm -rf /`、`command rm`、`env rm`、`eval "rm -rf $DIR"`、`bash -c "…"`、`\| xargs rm`，以及管进 shell 的 heredoc |
 | 触发时的费用 | `claude-opus-5` 上 **$0.0048**，便宜的审查模型 $0.002 |
 | 触发时的延迟 | 约 3 秒 |
 | 审查模型看到什么 | 约 356 token —— 只有那一次被标记的调用，**不是你的会话** |
