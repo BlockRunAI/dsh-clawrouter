@@ -157,6 +157,7 @@ Base 链上 5 美元的 USDC 够跑几千次调用。配置里写的是**引用*
 - **中断请求会立刻停止投递，但底层 HTTP 请求本身还取消不了**——要等 `@blockrun/llm` 支持 `AbortSignal`，目前连接会在 SDK 自己的超时后关闭。
 - **没有花费投影（spend projection）。** Harness 的会话日志会拒绝它不认识的事件类型，而仓库外的插件无法把自己的事件标记为可忽略——所以本插件不写任何会话事件。实际结算金额在 `~/.blockrun/cost_log.jsonl`。
 - **智能路由（`blockrun/auto`）尚未接入**，目前请直接指定模型 id。
+- **上一轮的 reasoning 不会回传。** DeepSeek 的思考模式文档要求在带 tool call 的轮次回传 `reasoning_content`，但这一条路由要服务 <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个来自不同厂商的模型——某一家要求的字段，另一家可能直接拒绝。所以推理模型配合多步工具调用时效果可能略有下降，遇到了请反馈。
 
 ## 开发
 

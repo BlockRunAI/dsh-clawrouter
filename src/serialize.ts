@@ -43,15 +43,26 @@ export function buildRequestBody(options: GenerateOptions): Record<string, unkno
   }
 }
 
-/** Serialize one harness message; a tool-result message becomes one `tool` message per block. */
+/** Serialize one harness message; a tool-result block becomes its own `tool` message. */
 function serializeMessage(message: Message): WireMessage[] {
   const toolResults = message.content.filter(block => block.type === 'tool-result')
-  if (toolResults.length > 0) {
-    return toolResults.map(block => ({
-      role: 'tool' as const,
-      tool_call_id: block.toolCallId,
-      content: flattenText(block.content),
-    }))
+  if (toolResults.length > 0 && message.role !== 'assistant') {
+    const text = flattenText(message.content)
+    return [
+      // Tool results ride in user-role messages in the harness vocabulary, and
+      // one normally travels alone. When a message carries text as well, that
+      // text is something the user said — dropping it would silently delete a
+      // turn's input on the way to the model.
+      ...text.length > 0 ? [{ role: 'user' as const, content: text }] : [],
+      ...toolResults.map(block => ({
+        role: 'tool' as const,
+        tool_call_id: block.toolCallId,
+        // A tool that succeeded while printing nothing is ordinary — `chmod`,
+        // `mkdir`, a quiet build. The wire still needs some content: an empty
+        // string reads as a malformed tool message to strict gateways.
+        content: flattenText(block.content) || '(no output)',
+      })),
+    ]
   }
   if (message.role === 'assistant') {
     const calls = message.content.filter(block => block.type === 'tool-call')
