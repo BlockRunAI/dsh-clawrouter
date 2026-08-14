@@ -142,27 +142,41 @@ export class BlockrunAdapter extends LlmAdapter {
   }
 
   /**
+   * Refuse a reasoning request for a model that does not reason.
+   *
+   * `openai/gpt-4o` returns HTTP 400 for `reasoning_effort` **after taking
+   * payment**, measured against the live gateway. Checking the catalog first
+   * turns that into a free, local, actionable failure. Dropping the field
+   * instead would answer a request for thinking without any.
+   *
+   * @param model - the gateway model id.
+   * @param signal - cancellation for the catalog read.
+   * @throws LlmError `UNSUPPORTED` when the model declares no reasoning efforts.
+   */
+  async #assertReasons(model: string, signal: AbortSignal | undefined): Promise<void> {
+    const info = await this.#options.catalog.resolve(model, signal)
+    if (info?.reasoning !== undefined && info.reasoning.efforts.length > 0) return
+    throw new LlmError(
+      `dsh-clawrouter: "${model}" does not support reasoning effort on BlockRun; `
+      + 'omit reasoningEffort or select a model the catalog tags "reasoning"',
+      'UNSUPPORTED',
+    )
+  }
+
+  /**
    * Stream one model response.
    * @param options - the harness request.
    * @returns harness chunks in protocol order.
    * @throws LlmError for credential, transport, and protocol failures.
    */
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    if (options.reasoningEffort !== undefined) {
-      // Reasoning levels are not yet mapped onto this gateway's per-model
-      // dialects. Refusing names the gap; silently dropping it would return a
-      // non-reasoning answer to a request that asked for one.
-      throw new LlmError(
-        `dsh-clawrouter does not yet map reasoning effort "${options.reasoningEffort}" onto BlockRun`,
-        'UNSUPPORTED',
-      )
-    }
     // Credential first: it is a local check, and a deployment with no wallet
     // has a more fundamental problem than whichever model it named.
     const privateKey = await this.#options.resolveWalletKey()
     const connection = this.#options.connection()
     const model = auxiliaryModelFor(options, connection)
     await this.#assertServable(model, options.signal)
+    if (options.reasoningEffort !== undefined) await this.#assertReasons(model, options.signal)
     const body = await buildRequestBody(
       model === options.model ? options : { ...options, model },
       this.#options.resolveImage,

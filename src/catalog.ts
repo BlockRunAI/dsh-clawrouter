@@ -11,7 +11,7 @@
  * @module dsh-clawrouter/catalog
  */
 
-import type { LlmModelInfo, LlmResolvedModelInfo, ModelModality } from '@deepseek-ai/dsh-llm'
+import type { LlmModelInfo, LlmResolvedModelInfo, ModelModality, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import type { BlockrunCatalogModel } from './types.ts'
 import type { ModelRates } from './spend.ts'
@@ -45,6 +45,24 @@ const TEXT_ONLY: readonly ModelModality[] = ['text']
  * a request that cannot succeed.
  */
 const TEXT_AND_IMAGE: readonly ModelModality[] = ['text', 'image']
+
+/** The capability tag marking an entry that can reason before answering. */
+const REASONING_CATEGORY = 'reasoning'
+
+/**
+ * Reasoning efforts offered for a `reasoning`-tagged model.
+ *
+ * Declared from the tag, unlike vision, because the two get it wrong at very
+ * different cost. A wrongly-claimed vision model charges and then fails; a
+ * wrongly-claimed effort is translated to the vendor's nearest value and the
+ * answer still arrives. Sending an effort to a model that does not reason at
+ * all IS a paid failure on OpenAI, and {@link BlockrunAdapter} refuses that
+ * locally instead of paying to discover it.
+ */
+const REASONING_EFFORTS = [
+  { id: 'high' as ReasoningEffortId, name: 'High' },
+  { id: 'max' as ReasoningEffortId, name: 'Max', description: 'Most thinking the vendor offers' },
+]
 
 /** The capability tag marking an entry that accepts image input. */
 const VISION_CATEGORY = 'vision'
@@ -273,6 +291,9 @@ function projectModel(
     name: model.name !== undefined && model.name.length > 0 ? model.name : model.id,
     ...description === undefined || description.length === 0 ? {} : { description },
     inputModalities: [...acceptsImages(model, visionModels) ? TEXT_AND_IMAGE : TEXT_ONLY],
+    ...model.categories?.includes(REASONING_CATEGORY) === true
+      ? { reasoning: { efforts: REASONING_EFFORTS } }
+      : {},
     context: {
       contextWindow: positive(model.context_window) ?? positive(model.context_length) ?? DEFAULT_CONTEXT_WINDOW,
     },

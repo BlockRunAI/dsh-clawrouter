@@ -149,3 +149,28 @@ describe('suggestModels', () => {
     expect(suggestModels('deepseek', KNOWN).length).toBeLessThanOrEqual(3)
   })
 })
+
+describe('reasoning efforts', () => {
+  it('offers efforts for a reasoning-tagged model', () => {
+    const [model] = projectCatalog('blockrun', {
+      data: [{ id: 'deepseek/deepseek-reasoner', categories: ['chat', 'reasoning'] }],
+    })
+    expect(model?.reasoning?.efforts.map(effort => effort.id)).toEqual(['high', 'max'])
+  })
+
+  it('offers none for a model that does not reason', () => {
+    // Not cosmetic: `openai/gpt-4o` returns HTTP 400 for reasoning_effort after
+    // taking payment, so the adapter refuses locally on this absence.
+    const [model] = projectCatalog('blockrun', { data: [{ id: 'openai/gpt-4o', categories: ['chat', 'vision'] }] })
+    expect(model?.reasoning).toBeUndefined()
+  })
+
+  it('declares efforts from the tag, unlike vision', () => {
+    // The two fail at different cost. A wrongly-claimed vision model charges
+    // and fails; a wrongly-claimed effort is translated to the vendor's nearest
+    // value and the answer still arrives.
+    const [model] = projectCatalog('blockrun', { data: [{ id: 'xai/grok-4.5', categories: ['chat', 'reasoning'] }] })
+    expect(model?.reasoning?.efforts).toHaveLength(2)
+    expect(model?.inputModalities).toEqual(['text'])
+  })
+})

@@ -62,6 +62,9 @@ export async function buildRequestBody(
     ...options.temperature === undefined ? {} : { temperature: options.temperature },
     ...options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens },
     ...options.stop === undefined || options.stop.length === 0 ? {} : { stop: [...options.stop] },
+    ...options.reasoningEffort === undefined
+      ? {}
+      : { reasoning_effort: reasoningEffortFor(options.model, options.reasoningEffort) },
   }
 }
 
@@ -180,6 +183,28 @@ function flattenText(content: readonly ContentBlock[]): string {
     }
   }
   return parts.join('')
+}
+
+/**
+ * Translate a harness reasoning effort into the value this model's vendor accepts.
+ *
+ * `max` is DeepSeek's vocabulary, which the harness adopts. OpenAI's is
+ * `low | medium | high`, and it returns HTTP 400 **after taking payment** for
+ * anything else — measured against the live gateway on `openai/gpt-5.6-sol`.
+ * Anthropic, Google and xAI accepted `max` without error and without producing
+ * reasoning content either way, so downgrading them loses nothing.
+ *
+ * Downgrading rather than refusing is the right trade here: the caller asked
+ * for the most thinking available, and every vendor has a most. Refusing would
+ * turn a routine request into a hard failure over a spelling.
+ *
+ * @param model - the gateway model id, whose vendor prefix selects the dialect.
+ * @param effort - the harness effort id.
+ * @returns the value to send as `reasoning_effort`.
+ */
+export function reasoningEffortFor(model: string, effort: string): string {
+  if (effort === 'max' && !model.startsWith('deepseek/')) return 'high'
+  return effort
 }
 
 /** Serialize tool schemas into OpenAI's `tools` array. */

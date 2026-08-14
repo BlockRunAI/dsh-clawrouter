@@ -4,7 +4,14 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.8.0 — 2026-08-14
+## 0.9.0 — 2026-08-14
+
+### Added
+- **Reasoning effort.** Previously any `reasoningEffort` threw `UNSUPPORTED`, so a DSH user routing a reasoning model through BlockRun could not ask for more thinking at all. Efforts are now declared per model from the catalog's `reasoning` tag and sent as `reasoning_effort`. Measured on `deepseek/deepseek-reasoner`: `max` produced 386 characters of reasoning against 248 at the default, so it takes effect rather than merely being accepted.
+- **Per-vendor dialect translation.** `max` is DeepSeek's vocabulary, which the harness adopts; OpenAI's is `low | medium | high` and it returns HTTP 400 **after taking payment** for anything else. `max` is translated to each vendor's nearest value instead of being refused — asking for the most thinking available should not fail over a spelling. Anthropic, Google and xAI accepted `max` without error and without producing reasoning either way, so the downgrade loses them nothing.
+- **A local refusal for models that do not reason.** `openai/gpt-4o` charges and then rejects `reasoning_effort` outright, so the adapter checks the catalog first and fails free, naming the model and what to do instead.
+
+
 
 ### Fixed
 - **Every rule assumed a shell command; file writes caught 2 of 10.** Writing `.git/hooks/pre-commit`, `.github/workflows/ci.yml`, `~/.bashrc`, a LaunchAgent, `.gitconfig`, `.env`, or an npm `postinstall` all executes code later — on the next commit, the next CI run holding your secrets, the next install on someone else's machine. None were flagged; the two that were, were caught by the credential-path rule recognising a filename by accident. Now 10 of 10, with 0 false positives across 15 ordinary file edits including routine `package.json` work, `.env.example`, and documentation that discusses git hooks.

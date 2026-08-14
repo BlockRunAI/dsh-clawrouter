@@ -183,7 +183,15 @@ Anthropic 那种最糟。请求返回 200，然后把 `[Error: 400 {"message":"C
 
 自己验证过其他模型就往里加；那是改配置，不需要等这边发版。
 
-### 6. 一个钱包，<!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个模型
+### 6. 推理强度
+
+推理模型提供 `high` 和 `max`，按 catalog 的 `reasoning` 标签逐个声明。
+
+`max` 是 DeepSeek 的词汇，harness 沿用了它。OpenAI 的词汇是 `low | medium | high`，其他值会**收了钱之后返回 HTTP 400** —— 所以 `max` 会被翻译成各家最接近的值，而不是直接拒绝。「我要最多的思考」不该因为一个拼写而失败。
+
+但**完全不会推理的模型**是另一回事，会在**付款之前本地拒绝**：`openai/gpt-4o` 会先收钱再拒绝 `reasoning_effort`。catalog 里写明了哪些模型合格，所以这个判断不花钱。
+
+### 7. 一个钱包，<!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个模型
 
 注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
 

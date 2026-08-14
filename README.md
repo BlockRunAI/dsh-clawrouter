@@ -189,7 +189,15 @@ Anthropic's is the worst of these. The call returns 200 and streams `[Error: 400
 
 Widen it yourself as you verify others; that is a config change, not a release here.
 
-### 6. <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models from one wallet
+### 6. Reasoning effort
+
+Reasoning models get `high` and `max`, declared per model from the catalog's `reasoning` tag.
+
+`max` is DeepSeek's vocabulary, which the harness adopts. OpenAI's is `low | medium | high`, and it returns **HTTP 400 after taking payment** for anything else — so `max` is translated to each vendor's nearest value rather than refused. Asking for the most thinking available should not fail over a spelling.
+
+Asking a model that does not reason at all is a different case, and is refused **locally, before paying**: `openai/gpt-4o` charges and then rejects `reasoning_effort` outright. The catalog says which models qualify, so that costs nothing to discover.
+
+### 7. <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models from one wallet
 
 Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account.
 

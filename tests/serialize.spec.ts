@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CallId, createMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
-import { buildRequestBody } from '../src/serialize.ts'
+import { buildRequestBody, reasoningEffortFor } from '../src/serialize.ts'
 import type { ImageResolver } from '../src/serialize.ts'
 
 /** One harness message of the given role and content. */
@@ -178,5 +178,42 @@ describe('buildRequestBody', () => {
     expect(full['max_tokens']).toBe(64)
     expect(full['stop']).toEqual(['END'])
     expect(full['tools']).toEqual([{ type: 'function', function: { name: 't', description: 'd', parameters: { type: 'object' } } }])
+  })
+})
+
+describe('reasoningEffortFor', () => {
+  // `max` is DeepSeek's vocabulary, which the harness adopts. Measured against
+  // the live gateway: `openai/gpt-5.6-sol` returns HTTP 400 for it AFTER taking
+  // payment, because OpenAI's vocabulary is low | medium | high.
+  it('keeps max for DeepSeek, which defines it', () => {
+    expect(reasoningEffortFor('deepseek/deepseek-reasoner', 'max')).toBe('max')
+  })
+
+  it('downgrades max to high for every other vendor', () => {
+    for (const model of ['openai/gpt-5.6-sol', 'anthropic/claude-opus-5', 'google/gemini-3.5-flash']) {
+      expect(reasoningEffortFor(model, 'max')).toBe('high')
+    }
+  })
+
+  it('passes high through unchanged everywhere', () => {
+    // Accepted by every vendor tested, so there is nothing to translate.
+    for (const model of ['deepseek/deepseek-reasoner', 'openai/gpt-5.6-sol', 'xai/grok-4.5']) {
+      expect(reasoningEffortFor(model, 'high')).toBe('high')
+    }
+  })
+})
+
+describe('the request carries reasoning effort', () => {
+  it('sends the translated value', async () => {
+    const body = await buildRequestBody({
+      provider: 'blockrun', model: 'openai/gpt-5.6-sol', messages: [], reasoningEffort: 'max',
+    } as unknown as GenerateOptions)
+    expect(body['reasoning_effort']).toBe('high')
+  })
+
+  it('omits the field when no effort was asked for', async () => {
+    // Sending it unasked is a paid failure on a model that does not reason.
+    const body = await buildRequestBody({ provider: 'blockrun', model: 'm', messages: [] } as unknown as GenerateOptions)
+    expect('reasoning_effort' in body).toBe(false)
   })
 })
