@@ -217,3 +217,32 @@ live('prompt injection through the reviewed command', () => {
     expect(verdict.ruling, `reviewer said: ${verdict.reason}`).not.toBe('safe')
   }, 180_000)
 })
+
+live('context overflow against the real gateway', () => {
+  it('classifies a real overflow as CONTEXT_WINDOW_EXCEEDED so compaction can recover', async () => {
+    // gpt-4o genuinely holds 128,000 and rejects beyond it. The rejection
+    // arrives as {"message":"API request failed"} — the provider's wording is
+    // sanitized away — so this asserts the size-based path, which is the only
+    // signal left. A rejected request is not billed.
+    const over = 'The quick brown fox jumps over the lazy dog. '.repeat(14_000)
+    let code: string | undefined
+    try {
+      for await (const _ of adapter().stream({
+        provider: 'blockrun',
+        model: 'openai/gpt-4o',
+        maxTokens: 8,
+        messages: [createUserMessage({ content: [{ type: 'text', text: over }], source: { kind: 'user' } })],
+      } as never) as AsyncIterable<StreamChunk>) { /* drain */ }
+    } catch (error) {
+      code = (error as { failure?: { code?: string } }).failure?.code
+    }
+    // Unit tests said this worked once before, while the mapping was inert.
+    // Only the live path proves compaction can actually recover here.
+    expect(code).toBe('CONTEXT_WINDOW_EXCEEDED')
+  }, 300_000)
+
+  it('leaves an ordinary request on that model unaffected', async () => {
+    const chunks = await collect('openai/gpt-4o', 'Reply with exactly: OK', 8)
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+  }, 180_000)
+})
