@@ -12,7 +12,14 @@
  */
 
 import { BlockrunClient } from '@blockrun/llm'
-import { LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
+import {
+  CONTEXT_WINDOW_EXCEEDED_CODE,
+  isContextWindowExceededError,
+  isQuotaExceededError,
+  LlmAdapter,
+  LlmError,
+  QUOTA_EXCEEDED_CODE,
+} from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
   LlmModelInfo,
@@ -231,15 +238,46 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * @param status - status of a non-2xx gateway response.
  * @returns the normalized harness error code.
  */
-export function httpErrorCode(status: number): string {
+export function httpErrorCode(status: number, detail = ''): string {
   if (status === 401 || status === 403) return 'AUTH'
-  // x402's own status. Retrying cannot help: the wallet is short, or the
-  // signed authorization was refused.
+  // x402's own status, checked before the quota wording below: "insufficient
+  // balance" on a 402 is this wallet being short, which is the more precise
+  // answer than a generic account-quota failure.
   if (status === 402) return 'PAYMENT_REQUIRED'
+  if (isQuotaExceededError(detail)) return QUOTA_EXCEEDED_CODE
   if (status === 429) return 'RATE_LIMIT'
-  if (status === 400) return 'INVALID_REQUEST'
+  if (status === 400) {
+    // Compaction's overflow recovery keys on this exact code
+    // (`compaction-basic` compares `failure.code`), so reporting an overflow
+    // as a plain invalid request silently costs a long session its automatic
+    // recovery: it fails instead of compacting and carrying on.
+    if (isContextWindowExceededError(detail)) return CONTEXT_WINDOW_EXCEEDED_CODE
+    return 'INVALID_REQUEST'
+  }
   if (status >= 500) return 'SERVER'
   return `HTTP_${status}`
+}
+
+/**
+ * The provider wording a failure carries, for the detectors above.
+ *
+ * `@blockrun/llm` puts only `"<prefix>: HTTP <status>"` in `message` and keeps
+ * the decoded body on `response`, so matching the message alone would never
+ * see the text that identifies an overflow or an exhausted quota.
+ */
+function failureDetail(error: unknown): string {
+  const parts: string[] = []
+  if (error instanceof Error && error.message.length > 0) parts.push(error.message)
+  const response = (error as { response?: unknown })?.response
+  if (response !== undefined) {
+    try {
+      parts.push(typeof response === 'string' ? response : JSON.stringify(response))
+    } catch {
+      // A body that will not serialize still leaves the message above to match
+      // on; there is nothing further to recover from it.
+    }
+  }
+  return parts.join(' ')
 }
 
 /**
@@ -258,8 +296,9 @@ function asLlmError(error: unknown): LlmError {
     : undefined
   // A payment the SDK rejected before any request carries no status of its own.
   const paymentRejected = error instanceof Error && error.name === 'PaymentError'
+  const detail = failureDetail(error)
   const code = status !== undefined
-    ? httpErrorCode(status)
+    ? httpErrorCode(status, detail)
     : paymentRejected ? 'PAYMENT_REQUIRED' : 'TRANSPORT'
   return new LlmError(`BlockRun request failed: ${message}`, code, {
     cause: error,

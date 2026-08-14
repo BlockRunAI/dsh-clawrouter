@@ -4,6 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.2.6 — 2026-08-14
+
+### Fixed
+- **Long sessions lost automatic compaction recovery.** `compaction-basic` decides whether to recover from a context overflow by comparing the failure code against `CONTEXT_WINDOW_EXCEEDED`. This adapter reported an overflow as a plain `INVALID_REQUEST`, so the recovery never fired and the session simply failed instead of compacting and carrying on.
+
+  Overflow and exhausted-quota wording are now detected with the harness's own `isContextWindowExceededError` / `isQuotaExceededError`, and mapped to `CONTEXT_WINDOW_EXCEEDED` and `QUOTA`. A `402` stays `PAYMENT_REQUIRED` even when it says "insufficient balance" — x402's own status is the more precise answer, and a short wallet is a different fix from an exhausted account.
+
+  Detection reads the provider body as well as the message: `@blockrun/llm` puts only `"…: HTTP <status>"` in `message` and keeps the decoded body on `response`, so matching the message alone would never have seen the wording.
+- The empty-stream error now uses the harness's exported `EMPTY_RESPONSE_CODE` instead of a hardcoded copy, so a rename upstream cannot silently drop it out of the retryable set.
+
 ## 0.2.5 — 2026-08-14
 
 ### Fixed

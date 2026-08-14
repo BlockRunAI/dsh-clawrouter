@@ -13,7 +13,7 @@
  * @module dsh-clawrouter/translate
  */
 
-import { CallId, LlmError } from '@deepseek-ai/dsh-llm'
+import { CallId, EMPTY_RESPONSE_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, FinishReason, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { BlockrunStreamChunk, BlockrunToolCallDelta } from './types.ts'
 
@@ -84,7 +84,7 @@ export class StreamTranslator {
     if (this.#usage !== undefined) out.push({ type: 'usage', usage: this.#usage })
     if (this.#finish === undefined) {
       if (this.#blocks.size === 0) {
-        throw new LlmError('BlockRun returned an empty stream with no finish reason', 'EMPTY_RESPONSE')
+        throw new LlmError('BlockRun returned an empty stream with no finish reason', EMPTY_RESPONSE_CODE)
       }
       // Content arrived but the provider never named a reason. Reporting the
       // observed outcome beats inventing an error the response does not show.

@@ -37,6 +37,38 @@ describe('httpErrorCode', () => {
     expect(RETRYABLE.has(httpErrorCode(429))).toBe(true)
     expect(RETRYABLE.has(httpErrorCode(500))).toBe(true)
   })
+
+  it.each([
+    'This model\'s maximum context length is 128000 tokens',
+    'prompt is too long for this model',
+  ])('maps an overflow 400 to CONTEXT_WINDOW_EXCEEDED: %j', (detail) => {
+    // compaction-basic compares failure.code against this exact constant to
+    // decide whether to recover. Reporting an overflow as INVALID_REQUEST
+    // costs a long session its automatic compaction: it just fails.
+    expect(httpErrorCode(400, detail)).toBe('CONTEXT_WINDOW_EXCEEDED')
+  })
+
+  it('still reports an ordinary 400 as an invalid request', () => {
+    expect(httpErrorCode(400, 'unknown parameter: frobnicate')).toBe('INVALID_REQUEST')
+  })
+
+  it.each([
+    [429, 'insufficient quota for this account'],
+    [400, 'credits exhausted'],
+  ])('maps exhausted-account wording on %i to QUOTA', (status, detail) => {
+    // A quota is not a rate limit: retrying a rate limit helps, retrying an
+    // empty account does not. The wording match is the harness's own
+    // `isQuotaExceededError`; what is asserted here is that this adapter
+    // routes through it rather than flattening the case.
+    expect(httpErrorCode(status, detail)).toBe('QUOTA')
+    expect(RETRYABLE.has(httpErrorCode(status, detail))).toBe(false)
+  })
+
+  it('keeps 402 as a payment failure even when it says insufficient balance', () => {
+    // x402's own status is the more precise answer than a generic account
+    // quota: this wallet is short, and that is a different fix.
+    expect(httpErrorCode(402, 'insufficient balance')).toBe('PAYMENT_REQUIRED')
+  })
 })
 
 describe('auxiliaryModelFor', () => {
