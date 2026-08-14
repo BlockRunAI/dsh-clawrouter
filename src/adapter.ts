@@ -152,7 +152,7 @@ export class BlockrunAdapter extends LlmAdapter {
         try {
           next = await iterator.next()
         } catch (error) {
-          throw asLlmError(error, looksOversized(bodyChars, capacity))
+          throw asLlmError(error, looksOversized(bodyChars, capacity), client.getWalletAddress())
         }
         if (next.done === true) break
         // Checked again after the await: a turn cancelled while this read was
@@ -358,7 +358,7 @@ function failureDetail(error: unknown): string {
  * `@blockrun/llm` reports HTTP status as `statusCode`; `status` is accepted
  * too so an error from any other layer still carries its status through.
  */
-function asLlmError(error: unknown, oversized = false): LlmError {
+function asLlmError(error: unknown, oversized = false, walletAddress?: string): LlmError {
   if (error instanceof LlmError) return error
   const message = error instanceof Error ? error.message : String(error)
   const raw = (error as { statusCode?: unknown; status?: unknown })
@@ -375,7 +375,14 @@ function asLlmError(error: unknown, oversized = false): LlmError {
   // The text detectors get first say, so this stays correct the moment the
   // gateway stops sanitizing upstream errors away.
   const code = mapped === 'INVALID_REQUEST' && oversized ? CONTEXT_WINDOW_EXCEEDED_CODE : mapped
-  return new LlmError(`BlockRun request failed: ${message}`, code, {
+  // A payment failure is the one case where the reader needs a fact only this
+  // process holds. They configured a private key; the thing to send USDC to is
+  // the address derived from it, which they have no way to work out from the
+  // variable they set.
+  const funding = code === 'PAYMENT_REQUIRED' && walletAddress !== undefined
+    ? ` Send USDC on Base to ${walletAddress}, then retry.`
+    : ''
+  return new LlmError(`BlockRun request failed: ${message}${funding}`, code, {
     cause: error,
     ...status === undefined ? {} : { status },
   })

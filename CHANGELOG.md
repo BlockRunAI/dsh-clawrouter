@@ -4,6 +4,13 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.3.6 — 2026-08-14
+
+### Fixed
+- **An unfunded wallet did not say what to fund.** Following 0.3.5's setup instructions lands you here next: the payment is rejected and the error said "check your wallet balance" — but you configured a *private key*, and the address to send USDC to is derived from it. The one fact needed to act was the one fact missing. The failure now names the address.
+
+  The failure code was already right: `PAYMENT_REQUIRED` is not retryable, so an empty wallet fails immediately rather than being retried against three times.
+
 ## 0.3.5 — 2026-08-14
 
 ### Fixed

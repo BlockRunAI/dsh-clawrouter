@@ -7,6 +7,7 @@
 // is available, so `vitest run` on a machine without one is still green.
 //
 // Run with:  npx vitest run tests/live.e2e.ts
+import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -244,5 +245,34 @@ live('context overflow against the real gateway', () => {
   it('leaves an ordinary request on that model unaffected', async () => {
     const chunks = await collect('openai/gpt-4o', 'Reply with exactly: OK', 8)
     expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+  }, 180_000)
+})
+
+live('an unfunded wallet, against the real gateway', () => {
+  it('fails PAYMENT_REQUIRED and names the address to fund', async () => {
+    // A fresh random key is a valid EVM wallet with no balance. Costs nothing:
+    // a rejected payment is not charged, and the key never leaves this test.
+    const empty = `0x${randomBytes(32).toString('hex')}`
+    const broke = new BlockrunAdapter({
+      provider: 'blockrun',
+      connection: () => ({ apiUrl: API_URL, timeoutMs: 60_000 }),
+      resolveWalletKey: () => Promise.resolve(empty),
+      catalog: new BlockrunCatalog('blockrun', `${API_URL}/v1`),
+    })
+    let failure: { code?: string; message?: string } = {}
+    try {
+      for await (const _ of broke.stream({
+        provider: 'blockrun', model: 'deepseek/deepseek-chat', maxTokens: 8,
+        messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } })],
+      } as never) as AsyncIterable<StreamChunk>) { /* drain */ }
+    } catch (error) {
+      failure = { code: (error as { failure?: { code?: string } }).failure?.code, message: (error as Error).message }
+    }
+    // Not retryable, so an empty wallet fails fast rather than being retried
+    // against three times.
+    expect(failure.code).toBe('PAYMENT_REQUIRED')
+    // The reader set a private key; the address to fund is derived from it and
+    // is the one fact they cannot work out from what they configured.
+    expect(failure.message).toMatch(/Send USDC on Base to 0x[0-9a-fA-F]{40}/)
   }, 180_000)
 })

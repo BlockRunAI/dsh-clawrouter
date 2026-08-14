@@ -142,3 +142,4 @@ describe('spend metering through a real request', () => {
     expect(bodies).toHaveLength(1)
   })
 })
+
