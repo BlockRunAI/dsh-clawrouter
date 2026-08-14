@@ -4,6 +4,14 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.2.7 — 2026-08-14
+
+### Documented
+- Measured the gateway's real context behaviour rather than assuming it. `openai/gpt-4.1-nano` accepted a **450,037-token** prompt and recalled a marker from its first line — so there is **no silent truncation**, which was the failure worth ruling out: a session quietly losing its own beginning would be worse than an error.
+
+  The catalog declares 128,000 for that model, and the harness sizes compaction from the declared figure, so sessions can compact while the model would still have taken the whole prompt. That is catalog data to fix upstream; this plugin keeps reporting what the catalog says, because guessing higher would trade early compaction for silent overflow.
+- The context-overflow mapping added in 0.2.6 is unit-tested but could not be confirmed against real gateway wording, because an overflow could not be provoked. Said so rather than implying it was verified.
+
 ## 0.2.6 — 2026-08-14
 
 ### Fixed
