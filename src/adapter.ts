@@ -29,6 +29,7 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import { BlockrunCatalog, suggestModels, toModelInfo } from './catalog.ts'
 import { buildRequestBody } from './serialize.ts'
+import type { ImageResolver } from './serialize.ts'
 import { StreamTranslator } from './translate.ts'
 import type { BlockrunStreamChunk } from './types.ts'
 import type { SpendMeter } from './spend.ts'
@@ -62,6 +63,14 @@ export interface BlockrunAdapterOptions {
   catalog: BlockrunCatalog
   /** Counts what completed calls cost; omitted leaves spend uncounted. */
   meter?: SpendMeter
+  /**
+   * Reads image attachments for vision requests.
+   *
+   * Omitted when no attachment service is composed, which makes an image
+   * request fail with `UNSUPPORTED` naming the missing service rather than
+   * dropping the attachment.
+   */
+  resolveImage?: ImageResolver
 }
 
 /** Streams harness requests through the BlockRun gateway. */
@@ -130,7 +139,10 @@ export class BlockrunAdapter extends LlmAdapter {
     const connection = this.#options.connection()
     const model = auxiliaryModelFor(options, connection)
     await this.#assertServable(model, options.signal)
-    const body = buildRequestBody(model === options.model ? options : { ...options, model })
+    const body = await buildRequestBody(
+      model === options.model ? options : { ...options, model },
+      this.#options.resolveImage,
+    )
     // Captured before dispatch: if this request comes back 400, its size
     // against the model's own declared window is the only overflow signal the
     // gateway leaves us.

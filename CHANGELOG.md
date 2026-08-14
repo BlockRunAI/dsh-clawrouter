@@ -4,7 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.4.3 — 2026-08-14
+## 0.5.0 — 2026-08-14
+
+### Added
+- **Vision.** DeepSeek serves no vision model, so this is capability rather than savings. A user message carrying an image now serializes to OpenAI content parts with the attachment inlined as a `data:` URL; a message without one still serializes to a bare string, so text traffic is unchanged on the wire. Images are read through the optional attachment service, resolved per request, and several in one turn resolve concurrently.
+- **`visionModels`** selects which models may receive an image, defaulting to the four measured to work.
+
+### Measured
+- **The gateway's `vision` tag cannot be trusted, and the failures are paid.** Thirty-five entries carry it; ten were sent the same inline PNG. Google's three and `moonshot/kimi-k3` answered correctly. OpenAI's three returned HTTP 400 *after taking payment*, `xai/grok-4.5` returned 503, and both Anthropic models charged and streamed nothing at all — no error and no content, which downstream is indistinguishable from a model that had nothing to say. A model is therefore offered image input only when the gateway tags it `vision` **and** it appears in `visionModels`; the tag alone over-claims, and the list alone would keep claiming vision after the gateway retags a model.
+
+
 
 ### Added
 - **A from-zero Docker smoke test** (`npm run test:docker`). Installs the published package from npm into a container that has never seen this project and asserts eleven things: that the profile composes, that the gate ships disarmed, that `lib/` is in the tarball and `src/` is not, and that the npm description's model count matches the README's. Passes on `linux/arm64` and `linux/amd64`. Needs no wallet and no key.

@@ -159,7 +159,31 @@ A safety feature that is quietly off is worse than one never installed, because 
 
 `/gate` is therefore registered whether or not the gate is armed, and says which. `/gate drill` sends `rm -rf / --no-preserve-root` through the risk matcher and the real reviewer — never to a tool — and reports each stage separately, because they fail for unrelated reasons: a rule that stopped matching is a policy problem, an unreachable reviewer is a wallet or model problem. At runtime those both collapse into "escalate", which is indistinguishable from the gate working. The drill is what tells them apart. It costs one reviewer call.
 
-### 5. <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models from one wallet
+### 5. Vision — give your agent eyes it does not have
+
+DeepSeek serves no vision model, so this is capability rather than savings. Attach an image and a vision model reads it:
+
+```yaml
+- id: blockrun-llm
+  config:
+    visionModels: [google/gemini-3.5-flash]   # the default; widen as you verify
+```
+
+**The gateway's `vision` tag is not sufficient, so this plugin does not trust it.** Thirty-five entries carry it. Ten were sent the same inline PNG and asked its colour:
+
+| Model | Result |
+|---|---|
+| `google/gemini-2.5-flash`, `gemini-3.5-flash`, `gemini-3.6-flash` | answered correctly |
+| `moonshot/kimi-k3` | answered correctly |
+| `openai/gpt-4o`, `gpt-4.1`, `gpt-5.6-sol` | **HTTP 400 after taking payment** |
+| `xai/grok-4.5` | HTTP 503 after taking payment |
+| `anthropic/claude-sonnet-5`, `claude-opus-5` | **charged, then streamed nothing** — no error, no content |
+
+Anthropic's is the worst of these: downstream it is indistinguishable from a model that had nothing to say. So a model is offered image input only when the gateway tags it `vision` **and** it appears in `visionModels`, which defaults to the four measured to work. Both signals must agree — the tag alone over-claims, and the list alone would keep claiming vision for a model the gateway has since retagged.
+
+Widen it yourself as you verify others; that is a config change, not a release here.
+
+### 6. <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models from one wallet
 
 Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account.
 

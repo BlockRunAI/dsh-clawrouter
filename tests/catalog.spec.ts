@@ -51,13 +51,38 @@ describe('projectCatalog', () => {
     expect(ids).toEqual(['private/model-a'])
   })
 
-  it('declares text-only input even for a vision-tagged model', () => {
+  it('declares image input for a model measured to accept one', () => {
     const [model] = projectCatalog('blockrun', {
-      data: [{ id: 'openai/gpt-5.6-sol', categories: ['chat', 'vision'] }],
+      data: [{ id: 'google/gemini-3.5-flash', categories: ['chat', 'vision'] }],
     })
-    // This adapter refuses image content, so claiming the capability would
-    // admit an attachment the request then rejects mid-turn.
+    expect(model?.inputModalities).toEqual(['text', 'image'])
+  })
+
+  it('keeps a vision-TAGGED model text-only when it is not on the verified list', () => {
+    // The tag over-claims. Sent the same inline PNG, this model returned HTTP
+    // 400 after taking payment; Anthropic's charged and streamed nothing at
+    // all. Trusting the tag would admit an attachment that fails mid-turn,
+    // after the message is durable and the call is paid for.
+    const [model] = projectCatalog('blockrun', {
+      data: [{ id: 'openai/gpt-4o', categories: ['chat', 'vision'] }],
+    })
     expect(model?.inputModalities).toEqual(['text'])
+  })
+
+  it('keeps an untagged model text-only even if it is listed', () => {
+    // Both signals must agree, so a model the gateway has retagged away from
+    // vision stops being offered one without waiting for a release here.
+    const [model] = projectCatalog('blockrun', {
+      data: [{ id: 'google/gemini-3.5-flash', categories: ['chat'] }],
+    }, ['google/gemini-3.5-flash'])
+    expect(model?.inputModalities).toEqual(['text'])
+  })
+
+  it('takes a caller-supplied list, so a fixed gateway needs no release here', () => {
+    const [model] = projectCatalog('blockrun', {
+      data: [{ id: 'openai/gpt-4o', categories: ['chat', 'vision'] }],
+    }, ['openai/gpt-4o'])
+    expect(model?.inputModalities).toEqual(['text', 'image'])
   })
 
   it('sizes a model the catalog does not size', () => {

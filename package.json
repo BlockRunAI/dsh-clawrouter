@@ -1,6 +1,6 @@
 {
   "name": "dsh-clawrouter",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "A second brain for your DeepSeek Harness agent \u2014 strong-model review before risky tool calls, plus 67 models from one wallet. No accounts, no API keys.",
   "type": "module",
   "main": "lib/index.js",
@@ -57,6 +57,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.1",
+    "@deepseek-ai/dsh-attachment": ">=0.1.0-rc.6",
     "@deepseek-ai/dsh-commands": ">=0.1.0-rc.6",
     "@deepseek-ai/dsh-credentials": ">=0.1.0-rc.6",
     "@deepseek-ai/dsh-launch-environment": ">=0.1.0-rc.6",
@@ -68,6 +69,7 @@
     "@deepseek-ai/cordis-plugin-include": "^1.0.6",
     "@deepseek-ai/cordis-plugin-loader": "^1.0.2",
     "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-attachment": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-commands": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-credentials": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-launch-environment": "^0.1.0-rc.6",
@@ -82,5 +84,10 @@
   },
   "engines": {
     "node": "^22.19 || >=24"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-attachment": {
+      "optional": true
+    }
   }
 }

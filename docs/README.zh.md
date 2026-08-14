@@ -157,7 +157,31 @@ dsh plugin --profile web add dsh-clawrouter
 
 所以 `/gate` 无论闸门开不开都会注册，并直接告诉你是哪种状态。`/gate drill` 会把 `rm -rf / --no-preserve-root` 送进风险匹配器和真实的审查模型——**永远不会送给任何工具**——并分两段分别汇报，因为这两段的失败原因毫不相干：规则不再匹配是策略问题，审查模型连不上是钱包或模型问题。运行时这两种都会塌缩成「交给你」，而那和「闸门正常工作」长得一模一样。drill 就是用来把它们分开的。代价是一次审查调用。
 
-### 5. 一个钱包，<!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个模型
+### 5. 视觉 —— 给你的智能体一双它本来没有的眼睛
+
+DeepSeek 没有任何视觉模型，所以这是**能力**，不是省钱。贴一张图，视觉模型就能读：
+
+```yaml
+- id: blockrun-llm
+  config:
+    visionModels: [google/gemini-3.5-flash]   # 默认值；自己验证过就可以加
+```
+
+**网关的 `vision` 标签不足以采信，所以本插件不信它。** 带这个标签的有 35 个。我给其中 10 个发了同一张内联 PNG，问它是什么颜色：
+
+| 模型 | 结果 |
+|---|---|
+| `google/gemini-2.5-flash`、`gemini-3.5-flash`、`gemini-3.6-flash` | 答对 |
+| `moonshot/kimi-k3` | 答对 |
+| `openai/gpt-4o`、`gpt-4.1`、`gpt-5.6-sol` | **收了钱之后 HTTP 400** |
+| `xai/grok-4.5` | 收了钱之后 HTTP 503 |
+| `anthropic/claude-sonnet-5`、`claude-opus-5` | **收了钱，然后什么都没返回** —— 无报错，无内容 |
+
+Anthropic 那种最糟：在下游看来，它和「模型确实没什么可说的」完全无法区分。所以只有当网关给它打了 `vision` 标签**并且**它出现在 `visionModels` 里时，这个模型才会被声明支持图片输入。两个信号必须同时成立——只信标签会过度声称，只信列表则会在网关改标签之后继续声称。
+
+自己验证过其他模型就往里加；那是改配置，不需要等这边发版。
+
+### 6. 一个钱包，<!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个模型
 
 注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
 

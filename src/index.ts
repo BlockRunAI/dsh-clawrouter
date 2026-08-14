@@ -20,11 +20,15 @@ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from './adapter.ts'
 import type { BlockrunConnection } from './adapter.ts'
-import { BlockrunCatalog } from './catalog.ts'
+import { BlockrunCatalog, VERIFIED_VISION_MODELS } from './catalog.ts'
 import { renderSpend, SpendMeter } from './spend.ts'
 // Side-effect type import: `ctx.commands` exists only once the commands
 // package has been imported for its declaration merging.
 import type {} from '@deepseek-ai/dsh-commands'
+// Side-effect type import: `ctx.attachments` exists only once the attachment
+// package is composed. Typed here, resolved optionally at request time.
+import type {} from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 
 export { BlockrunAdapter } from './adapter.ts'
 export { BlockrunCatalog } from './catalog.ts'
@@ -72,6 +76,14 @@ export interface Config {
   walletKeyEnv?: string
   /** API root; point at the Solana gateway or a private deployment. */
   apiUrl?: string
+  /**
+   * Models this route may send images to.
+   *
+   * Defaults to the set measured to work through the gateway; a `vision` tag
+   * alone is not enough, since several tagged models charge and then fail. See
+   * {@link VERIFIED_VISION_MODELS}.
+   */
+  visionModels?: string[]
   /** Per-request SDK timeout in milliseconds. */
   timeoutMs?: number
   /**
@@ -101,6 +113,7 @@ export const Config: z<Config> = z.object({
   timeoutMs: z.natural().default(DEFAULT_TIMEOUT_MS),
   requestFeeUsd: z.number().min(0).default(DEFAULT_REQUEST_FEE_USD),
   auxiliaryModel: z.string(),
+  visionModels: z.array(z.string()).default([...VERIFIED_VISION_MODELS]),
 })
 
 /**
@@ -160,9 +173,29 @@ export function apply(ctx: Context, config: Config): void {
     )
   }
 
-  const catalog = new BlockrunCatalog(provider, `${apiUrl}/v1`)
+  const catalog = new BlockrunCatalog(provider, `${apiUrl}/v1`, Date.now, config.visionModels)
   const meter = new SpendMeter(config.requestFeeUsd ?? DEFAULT_REQUEST_FEE_USD)
-  const adapter = new BlockrunAdapter({ provider, connection, resolveWalletKey, catalog, meter })
+  /**
+   * Reads an image attachment as a `data:` URL, when a store is composed.
+   *
+   * Resolved per request through `ctx.get` rather than captured at load, so a
+   * store that mounts later is picked up without a restart. Absent, the
+   * adapter refuses image content naming the missing service instead of
+   * dropping the attachment.
+   */
+  const resolveImage = async (ref: ImageAttachmentRef): Promise<string> => {
+    const store = ctx.get('attachments')
+    if (store === undefined) {
+      throw new LlmError(
+        'dsh-clawrouter needs the attachment service to send an image; compose @deepseek-ai/dsh-attachment',
+        'UNSUPPORTED',
+      )
+    }
+    const stored = await store.readImage(ref)
+    return `data:${ref.mediaType};base64,${Buffer.from(stored.data).toString("base64")}`
+  }
+
+  const adapter = new BlockrunAdapter({ provider, connection, resolveWalletKey, catalog, meter, resolveImage })
 
   // Optional child fiber: a composition with no command surface still routes
   // requests; it just has nowhere to print this.

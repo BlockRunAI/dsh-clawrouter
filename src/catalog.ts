@@ -33,18 +33,42 @@ export const DEFAULT_CONTEXT_WINDOW = 131_072
 /** Output capability assumed for a model the catalog does not size. */
 export const DEFAULT_MAX_TOKENS = 8_192
 
+/** Input modalities for an entry the gateway does not tag `vision`. */
+const TEXT_ONLY: readonly ModelModality[] = ['text']
+
 /**
- * Every model on this route is declared text-only, including the ones whose
- * catalog entry is tagged `vision`.
+ * Input modalities for a `vision`-tagged entry.
  *
- * This adapter does not yet serialize image content, so claiming the capability
- * would admit an attachment the request then refuses — after the message is
- * durable, leaving the session repeating a request that cannot succeed.
- * Under-claiming instead refuses the image up front, naming the model. The two
- * wrong answers do not cost the same. Widen this the moment `serialize.ts`
- * carries images.
+ * Declared from the catalog's own tag rather than for every model: claiming
+ * image input on a text-only model would admit an attachment the request then
+ * refuses, after the message is already durable, leaving the session repeating
+ * a request that cannot succeed.
  */
-const DECLARED_INPUT: readonly ModelModality[] = ['text']
+const TEXT_AND_IMAGE: readonly ModelModality[] = ['text', 'image']
+
+/** The capability tag marking an entry that accepts image input. */
+const VISION_CATEGORY = 'vision'
+
+/**
+ * Models measured to actually accept an image through this gateway.
+ *
+ * The `vision` tag is not sufficient. Ten tagged models were sent the same
+ * inline PNG: Google's and Moonshot's answered correctly, OpenAI's returned
+ * HTTP 400 after taking payment, xAI's returned 503, and Anthropic's charged
+ * and streamed nothing at all — no error, no content, which reads downstream
+ * as a model that simply had nothing to say.
+ *
+ * Declaring image input from the tag would therefore admit an attachment that
+ * fails mid-turn, after the message is durable, having already been paid for.
+ * The default is the measured set; `visionModels` widens it as the gateway
+ * improves, without waiting for a release here.
+ */
+export const VERIFIED_VISION_MODELS: readonly string[] = [
+  'google/gemini-2.5-flash',
+  'google/gemini-3.5-flash',
+  'google/gemini-3.6-flash',
+  'moonshot/kimi-k3',
+]
 
 /** The capability tag marking an entry this route can actually converse with. */
 const CHAT_CATEGORY = 'chat'
@@ -70,6 +94,7 @@ export class BlockrunCatalog {
     private readonly provider: string,
     private readonly baseURL: string,
     private readonly now: () => number = Date.now,
+    private readonly visionModels: readonly string[] = VERIFIED_VISION_MODELS,
   ) {}
 
   /** Published rates from the last successful read, by model id. */
@@ -175,7 +200,7 @@ export class BlockrunCatalog {
       )
     }
     const body: unknown = await response.json()
-    const models = projectCatalog(this.provider, body)
+    const models = projectCatalog(this.provider, body, this.visionModels)
     this.#cache = { models, rates: projectRates(body), fetchedAt: this.now() }
     return models
   }
@@ -191,7 +216,11 @@ export class BlockrunCatalog {
  * @param body - decoded `GET /models` response.
  * @returns descriptors for every entry carrying a non-empty string id.
  */
-export function projectCatalog(provider: string, body: unknown): readonly LlmResolvedModelInfo[] {
+export function projectCatalog(
+  provider: string,
+  body: unknown,
+  visionModels: readonly string[] = VERIFIED_VISION_MODELS,
+): readonly LlmResolvedModelInfo[] {
   const data = (body as { data?: unknown })?.data
   const entries: unknown[] = Array.isArray(data) ? data : Array.isArray(body) ? body : []
   const models: LlmResolvedModelInfo[] = []
@@ -200,7 +229,7 @@ export function projectCatalog(provider: string, body: unknown): readonly LlmRes
     const model = entry as BlockrunCatalogModel
     if (typeof model.id !== 'string' || model.id.length === 0) continue
     if (!isChatCapable(model)) continue
-    models.push(projectModel(provider, model))
+    models.push(projectModel(provider, model, visionModels))
   }
   return models
 }
@@ -220,15 +249,30 @@ function isChatCapable(model: BlockrunCatalogModel): boolean {
   return model.categories.includes(CHAT_CATEGORY)
 }
 
+/**
+ * Whether an image may be sent to this entry.
+ *
+ * Both the gateway's tag and the verified list must agree: the tag alone
+ * over-claims (see {@link VERIFIED_VISION_MODELS}), and the list alone would
+ * keep claiming vision for an entry the gateway has since retagged.
+ */
+function acceptsImages(model: BlockrunCatalogModel, visionModels: readonly string[]): boolean {
+  return model.categories?.includes(VISION_CATEGORY) === true && visionModels.includes(model.id)
+}
+
 /** Project one catalog entry; every harness-owned default is applied here rather than at use. */
-function projectModel(provider: string, model: BlockrunCatalogModel): LlmResolvedModelInfo {
+function projectModel(
+  provider: string,
+  model: BlockrunCatalogModel,
+  visionModels: readonly string[],
+): LlmResolvedModelInfo {
   const description = model.description
   return {
     provider,
     id: model.id,
     name: model.name !== undefined && model.name.length > 0 ? model.name : model.id,
     ...description === undefined || description.length === 0 ? {} : { description },
-    inputModalities: [...DECLARED_INPUT],
+    inputModalities: [...acceptsImages(model, visionModels) ? TEXT_AND_IMAGE : TEXT_ONLY],
     context: {
       contextWindow: positive(model.context_window) ?? positive(model.context_length) ?? DEFAULT_CONTEXT_WINDOW,
     },

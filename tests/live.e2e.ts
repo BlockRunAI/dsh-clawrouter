@@ -53,8 +53,14 @@ function adapter(): BlockrunAdapter {
     connection: () => ({ apiUrl: API_URL, timeoutMs: 120_000 }),
     resolveWalletKey: () => Promise.resolve(KEY!),
     catalog: new BlockrunCatalog('blockrun', `${API_URL}/v1`),
+    // Stands in for the attachment service: these tests exercise the wire
+    // format, not the harness's attachment storage.
+    resolveImage: async () => `data:image/png;base64,${RED_8x8}`,
   })
 }
+
+/** A solid red 8x8 PNG, inlined so the suite needs no fixture file. */
+const RED_8x8 = 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX/AAD///9BHTQRAAAAD0lEQVR42mNgGAWjYBQMHQAAAtAAAeaMPGgAAAAASUVORK5CYII='
 
 /** Drive one real request to completion. */
 async function collect(model: string, text: string, maxTokens = 64, system?: string): Promise<StreamChunk[]> {
@@ -292,4 +298,31 @@ describe('the README model count matches the live catalog', () => {
     expect(live, 'catalog returned nothing usable').toBeGreaterThan(0)
     expect(claimed, `README says ${claimed}, catalog exposes ${live}; run \`npm run sync:models\``).toBe(live)
   })
+})
+
+live('vision', () => {
+  it('sends an image and gets an answer that depends on it', async () => {
+    // The wire format is a claim about the gateway, not just about this code:
+    // the request body switches from a string to OpenAI content parts, and
+    // only a real call can show the image survives to the model.
+    const chunks: StreamChunk[] = []
+    for await (const chunk of adapter().stream({
+      provider: 'blockrun',
+      model: 'google/gemini-3.5-flash',
+      maxTokens: 24,
+      messages: [createUserMessage({
+        content: [
+          { type: 'text', text: 'What colour fills this image? Answer with one word.' },
+          { type: 'image', attachment: { attachmentId: 'live', mediaType: 'image/png', bytes: 0, width: 8, height: 8 } },
+        ],
+        source: { kind: 'user' },
+      })],
+    } as never) as AsyncIterable<StreamChunk>) chunks.push(chunk)
+
+    const answer = chunks
+      .filter(chunk => chunk.type === 'text-delta')
+      .map(chunk => (chunk as { text: string }).text)
+      .join('')
+    expect(answer.toLowerCase()).toContain('red')
+  }, 120_000)
 })

@@ -7,11 +7,29 @@
 
 import type { ContentBlock, GenerateOptions, Message, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { LlmError } from '@deepseek-ai/dsh-llm'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+
+/**
+ * Read one image attachment and return it as a `data:` URL.
+ *
+ * Images arrive as content-addressed references, never bytes, so sending one
+ * requires a read through the attachment service. Passing this in keeps
+ * serialization a pure function of its inputs and testable without a store.
+ *
+ * @param ref - the reference carried by the image block.
+ * @returns a `data:<mediaType>;base64,<payload>` URL.
+ */
+export type ImageResolver = (ref: ImageAttachmentRef) => Promise<string>
+
+/** One part of a multimodal message body. */
+type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
 
 /** One OpenAI-compatible request message. */
 interface WireMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content?: string
+  content?: string | ContentPart[]
   tool_call_id?: string
   tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[]
 }
@@ -19,15 +37,19 @@ interface WireMessage {
 /**
  * Build the streaming request body.
  * @param options - the harness request.
+ * @param resolveImage - reads image attachments; omit for a text-only build, which then refuses an image.
  * @returns a JSON body for `POST /chat/completions`.
  * @throws LlmError `UNSUPPORTED` for a request this adapter cannot express.
  */
-export function buildRequestBody(options: GenerateOptions): Record<string, unknown> {
+export async function buildRequestBody(
+  options: GenerateOptions,
+  resolveImage?: ImageResolver,
+): Promise<Record<string, unknown>> {
   const messages: WireMessage[] = []
   if (options.system !== undefined && options.system.length > 0) {
     messages.push({ role: 'system', content: options.system })
   }
-  for (const message of options.messages) messages.push(...serializeMessage(message))
+  for (const message of options.messages) messages.push(...await serializeMessage(message, resolveImage))
   return {
     model: options.model,
     messages,
@@ -44,7 +66,7 @@ export function buildRequestBody(options: GenerateOptions): Record<string, unkno
 }
 
 /** Serialize one harness message; a tool-result block becomes its own `tool` message. */
-function serializeMessage(message: Message): WireMessage[] {
+async function serializeMessage(message: Message, resolveImage?: ImageResolver): Promise<WireMessage[]> {
   const toolResults = message.content.filter(block => block.type === 'tool-result')
   if (toolResults.length > 0 && message.role !== 'assistant') {
     const text = flattenText(message.content)
@@ -81,7 +103,43 @@ function serializeMessage(message: Message): WireMessage[] {
       },
     }]
   }
-  return [{ role: message.role === 'system' ? 'system' : 'user', content: flattenText(message.content) }]
+  return [{
+    role: message.role === 'system' ? 'system' : 'user',
+    content: await renderContent(message.content, resolveImage),
+  }]
+}
+
+/**
+ * Render user-role content, carrying images when the message has any.
+ *
+ * A message with no image serializes to a bare string exactly as before.
+ * Switching every message to the parts array would be a wire change affecting
+ * all traffic to gain nothing, and gateways vary in how well they accept it.
+ */
+async function renderContent(
+  content: readonly ContentBlock[],
+  resolveImage?: ImageResolver,
+): Promise<string | ContentPart[]> {
+  const images = content.filter(block => block.type === 'image')
+  if (images.length === 0) return flattenText(content)
+  if (resolveImage === undefined) {
+    throw new LlmError(
+      'dsh-clawrouter cannot send an image without the attachment service; compose @deepseek-ai/dsh-attachment or remove the attachment',
+      'UNSUPPORTED',
+    )
+  }
+  // Flattened without the image blocks: `flattenText` throws on one, since
+  // every other slot it serves takes a string on the wire.
+  const text = flattenText(content.filter(block => block.type !== 'image'))
+  return [
+    ...text.length === 0 ? [] : [{ type: 'text' as const, text }],
+    // Resolved in parallel: a turn can carry several screenshots, and reading
+    // them one after another adds their latencies for no reason.
+    ...await Promise.all(images.map(async block => ({
+      type: 'image_url' as const,
+      image_url: { url: await resolveImage(block.attachment) },
+    }))),
+  ]
 }
 
 /**
@@ -91,6 +149,10 @@ function serializeMessage(message: Message): WireMessage[] {
  * from an earlier turn, and no OpenAI-compatible request slot carries them
  * back. An image block instead fails loud — silently dropping it would send a
  * request that reads as if the user never attached anything.
+ *
+ * User-role content goes through {@link renderContent}, which carries images.
+ * This path remains for the two slots that are string-only on the wire: an
+ * assistant turn and a `tool` message.
  */
 function flattenText(content: readonly ContentBlock[]): string {
   const parts: string[] = []
@@ -104,8 +166,11 @@ function flattenText(content: readonly ContentBlock[]): string {
       case 'tool-result':
         break
       case 'image':
+        // Reachable only from an assistant turn or a tool result, whose
+        // OpenAI content field is a string. A screenshot-returning tool has to
+        // hand back a reference in text rather than an image block.
         throw new LlmError(
-          'dsh-clawrouter does not yet send image content to BlockRun; select a text-only model or remove the attachment',
+          'dsh-clawrouter cannot put an image in an assistant or tool message; only user messages carry images',
           'UNSUPPORTED',
         )
       default:
