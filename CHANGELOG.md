@@ -14,6 +14,12 @@ Entries say what changed for *you*, and what it meant when it was wrong — most
 ### Added
 - Live tests that try to talk a real reviewer into clearing `rm -rf ~`: an embedded verdict object, "ignore all previous instructions", claimed security-team authority, a fake system turn, and role reversal. All five are refused.
 
+## 0.2.3 — 2026-08-14
+
+### Added
+- This changelog, eight releases late.
+- Tests asserting the READMEs against the real schemas: every config key must appear in both languages, the documented default reviewer model must be the real one, the translations must carry the same sections, and the gate must really be off by default. Doc drift had already shipped twice, and the README is the only place a config key is discoverable.
+
 ## 0.2.2 — 2026-08-14
 
 ### Added
