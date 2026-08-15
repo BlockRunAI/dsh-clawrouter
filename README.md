@@ -129,11 +129,22 @@ Not every dangerous action is a shell command. Writing `.git/hooks/pre-commit`, 
 
 What this route has cost since the process started — total, per model, tokens and flat fees separately.
 
-**This route is priced per request, not per token.** Measured against a funded wallet: three calls capped at 24 output tokens cost $0.006, three capped at 4096 cost $0.006, and one that generated 8,000 output tokens cost $0.002 — the same per call every time. What settles is the signed 402 quote, and settlement does not depend on what the model then produces.
+**You pay for what you request, not what you get.** The gateway quotes from the request — input size plus the `max_tokens` you ask for — and settles that quoted amount whichever way the model answers. Measured against production:
 
-So `/spend` reports `calls x price` and carries token counts as counts, never converting them into money. Pricing that 8,000-token call from its tokens gave $0.004243, more than double the real charge.
+| `max_tokens` requested | `claude-opus-5` | `deepseek-chat` |
+|---|---|---|
+| 16 | $0.0020 | $0.0020 |
+| 1,000 | $0.0036 | $0.0020 |
+| 8,000 | $0.0211 | $0.0020 |
+| 60,000 | $0.1511 | $0.0027 |
 
-The request price is flat up to about a thousand input tokens, then climbs with **both context and the model**. Measured from the gateway's own 402 quotes (reading a quote costs nothing):
+Two things follow, and the second one costs real money.
+
+**There is a floor of $0.002** — a $0.001 minimum payment plus a flat $0.001 transaction fee. Below it everything quotes the same, which is why `deepseek-chat` barely moves in that table: it is cheap enough that even 8,000 output tokens stays under the floor. An earlier version of this section concluded from exactly that observation that billing was per request rather than per token. It was measured only on `deepseek-chat`, the cheapest model on the route, where the floor hides the rate entirely.
+
+**A large `max_tokens` is billed even when the reply is short.** This is why `defaultMaxTokens` is capped at `maxOutputCeiling` (8,192) rather than taken from a model's advertised `max_output`. Left uncapped, `claude-opus-5` advertises 128,000, and a request carrying that default quotes **$0.3211** — against $0.0216 with no cap at all and $0.0036 capped at 1,000. Eighty-nine times the cost, decided by a field the caller never set. Raise `maxOutputCeiling` when a workload genuinely needs long replies; you are then paying for them deliberately.
+
+**Input size drives the other half of the quote.** The same request at growing prompt sizes, `max_tokens` held small:
 
 | Model | small | ~22K in | ~112K in |
 |---|---|---|---|
@@ -142,7 +153,9 @@ The request price is flat up to about a thousand input tokens, then climbs with 
 | `google/gemini-3.5-flash` | $0.002 | $0.066 | $0.325 |
 | `anthropic/claude-opus-5` | $0.002 | $0.217 | **$1.081** |
 
-Everything starts at the same $0.002 and then diverges by more than thirty-fold. A coding agent holding a 100K-token context pays roughly fifteen times the floor per call on DeepSeek — and **five hundred times** on Opus. `/spend` says so whenever your average call carries a large context, and points you at your own model's rate rather than one number. It is also blind to a request that failed after paying. Your wallet balance is the authority.
+Everything starts at the same floor and then diverges by more than thirty-fold. A coding agent holding a 100K-token context pays roughly fifteen times the floor per call on DeepSeek — and five hundred times on Opus. `/spend` says so whenever your average call carries a large context, and points you at your own model's rate rather than one number. It is also blind to a request that failed after paying. Your wallet balance is the authority.
+
+Reading a 402 quote is free, so every figure above is reproducible without spending anything.
 
 The default `requestFeeUsd` is `0.002` because that is what the gateway quotes: a 402 for a ~17-token request returns `{"amount":"0.002000"}`. BlockRun's published pricing page currently says $0.001.
 

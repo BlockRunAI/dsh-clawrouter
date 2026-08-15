@@ -1,6 +1,6 @@
 {
   "name": "dsh-clawrouter",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "A second brain for your DeepSeek Harness agent \u2014 strong-model review before risky tool calls, plus 67 models from one wallet. No accounts, no API keys.",
   "type": "module",
   "main": "lib/index.js",

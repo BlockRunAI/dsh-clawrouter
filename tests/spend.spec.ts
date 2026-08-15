@@ -12,10 +12,13 @@ const usage = (input: number, output: number, cacheRead = 0): TokenUsage => ({
 const PRICE = 0.002
 
 describe('SpendMeter', () => {
-  it('prices per request, not per token', () => {
-    // Measured against the wallet: a call generating 8,000 output tokens cost
-    // exactly the same as one generating 3. Settlement follows the signed 402
-    // quote and is independent of what the model then produced.
+  it('is unmoved by how much the model produced', () => {
+    // Settlement follows the signed 402 quote, which is computed from the
+    // request — input size plus the max_tokens asked for — so what the model
+    // then produced cannot change the charge. Both calls below were quoted
+    // identically; an earlier version of this test read that as proof of
+    // per-request billing, which it is not. Per-token pricing is live above a
+    // $0.002 floor; these two simply sit under it.
     const perToken = new SpendMeter(PRICE)
     perToken.record('deepseek/deepseek-chat', usage(17, 8_000))
     const perCall = new SpendMeter(PRICE)
@@ -40,7 +43,7 @@ describe('SpendMeter', () => {
     // become money, because nothing here does.
     expect(summary.inputTokens).toBe(150)
     expect(summary.outputTokens).toBe(20)
-    expect(renderSpend(summary)).toMatch(/not billed by token/)
+    expect(renderSpend(summary)).toMatch(/produced, not what was quoted/)
   })
 
   it('ranks models by how often they were called', () => {
@@ -60,7 +63,7 @@ describe('SpendMeter', () => {
     const meter = new SpendMeter(PRICE)
     meter.record('deepseek/deepseek-chat', usage(14, 1))
     const text = renderSpend(meter.summary())
-    expect(text).toMatch(/Priced per request, not per token/)
+    expect(text).toMatch(/Quoted from the request/)
     expect(text).toMatch(/wallet balance is the authority/)
     // Small amounts stay legible rather than rounding to $0.00.
     expect(text).not.toMatch(/\$0\.00\b/)

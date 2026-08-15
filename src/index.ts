@@ -20,7 +20,7 @@ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from './adapter.ts'
 import type { BlockrunConnection } from './adapter.ts'
-import { BlockrunCatalog, VERIFIED_VISION_MODELS } from './catalog.ts'
+import { BlockrunCatalog, DEFAULT_MAX_TOKENS_CEILING, VERIFIED_VISION_MODELS } from './catalog.ts'
 import { renderSpend, SpendMeter } from './spend.ts'
 // Side-effect type import: `ctx.commands` exists only once the commands
 // package has been imported for its declaration merging.
@@ -84,6 +84,14 @@ export interface Config {
    * {@link VERIFIED_VISION_MODELS}.
    */
   visionModels?: string[]
+  /**
+   * Ceiling on the default output cap taken from a model's `max_output`.
+   *
+   * The gateway quotes on requested `max_tokens` and settles that amount, so a
+   * model's full advertised ceiling bills every unspecified call for output
+   * nobody asked for. Raise it when a workload genuinely needs longer replies.
+   */
+  maxOutputCeiling?: number
   /** Per-request SDK timeout in milliseconds. */
   timeoutMs?: number
   /**
@@ -114,6 +122,7 @@ export const Config: z<Config> = z.object({
   requestFeeUsd: z.number().min(0).default(DEFAULT_REQUEST_FEE_USD),
   auxiliaryModel: z.string(),
   visionModels: z.array(z.string()).default([...VERIFIED_VISION_MODELS]),
+  maxOutputCeiling: z.natural().default(DEFAULT_MAX_TOKENS_CEILING),
 })
 
 /**
@@ -173,7 +182,7 @@ export function apply(ctx: Context, config: Config): void {
     )
   }
 
-  const catalog = new BlockrunCatalog(provider, `${apiUrl}/v1`, Date.now, config.visionModels)
+  const catalog = new BlockrunCatalog(provider, `${apiUrl}/v1`, Date.now, config.visionModels, config.maxOutputCeiling)
   const meter = new SpendMeter(config.requestFeeUsd ?? DEFAULT_REQUEST_FEE_USD)
   /**
    * Reads an image attachment as a `data:` URL, when a store is composed.

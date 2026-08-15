@@ -4,7 +4,16 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## 0.9.0 — 2026-08-14
+## 0.10.0 — 2026-08-15
+
+### Fixed
+- **The default output cap billed 89x on Opus.** This gateway quotes from the request — input size plus the `max_tokens` asked for — and settles that amount whichever way the model answers. `defaultMaxTokens` was taken from a model's advertised `max_output`, so `anthropic/claude-opus-5` carried a 128,000 default and quoted **$0.3211** per call, against $0.0216 with no cap and $0.0036 capped at 1,000. Eighty-nine times the cost, decided by a field the caller never set. Capped at the new `maxOutputCeiling` (8,192); raise it when a workload genuinely needs long replies.
+
+### Corrected
+- **"Priced per request, not per token" was wrong, and had been since 0.3.2.** Per-token pricing is live. What the earlier measurement found was a **floor** — a $0.001 minimum payment plus a flat $0.001 transaction fee — and it was taken only on `deepseek/deepseek-chat`, the cheapest model on the route, where even 8,000 output tokens stays under that floor. Opus across the same range: $0.0020 at 16 tokens, $0.0036 at 1,000, $0.0211 at 8,000, $0.1511 at 60,000. The observation that produced tokens do not change the charge was correct; the explanation was not. Thanks to Dev J for checking it against production rather than taking it on faith.
+- `/spend` no longer says "not billed by token". Its figure remains a lower bound, for a better-understood reason.
+
+
 
 ### Added
 - **Reasoning effort.** Previously any `reasoningEffort` threw `UNSUPPORTED`, so a DSH user routing a reasoning model through BlockRun could not ask for more thinking at all. Efforts are now declared per model from the catalog's `reasoning` tag and sent as `reasoning_effort`. Measured on `deepseek/deepseek-reasoner`: `max` produced 386 characters of reasoning against 248 at the default, so it takes effect rather than merely being accepted.

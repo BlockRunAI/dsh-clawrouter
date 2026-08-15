@@ -120,7 +120,7 @@ export function renderSpend(summary: SpendSummary): string {
   if (summary.calls === 0) return 'No BlockRun requests yet in this process.'
   const lines = [
     `${usd(summary.totalUsd)} across ${summary.calls} request${summary.calls === 1 ? '' : 's'}`,
-    `  ${summary.inputTokens.toLocaleString()} tokens in / ${summary.outputTokens.toLocaleString()} out (not billed by token)`,
+    `  ${summary.inputTokens.toLocaleString()} tokens in / ${summary.outputTokens.toLocaleString()} out (produced, not what was quoted)`,
     '',
   ]
   for (const entry of summary.byModel) {
@@ -129,7 +129,8 @@ export function renderSpend(summary: SpendSummary): string {
   const averageInput = summary.calls === 0 ? 0 : summary.inputTokens / summary.calls
   lines.push(
     '',
-    'Priced per request, not per token: measured against the wallet, a call generating 8,000 output tokens cost the same as one generating 3.',
+    'Quoted from the request — input size plus the max_tokens asked for — and settled at that amount whichever way the model answers.'
+    + ' These counts are what was produced, so they cannot reconstruct the charge.',
   )
   if (averageInput > FLOOR_RELIABLE_INPUT_TOKENS) {
     // Silence here would be the misleading part. The quote climbs with input,

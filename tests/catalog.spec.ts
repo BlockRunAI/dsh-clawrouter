@@ -22,7 +22,10 @@ describe('projectCatalog', () => {
     // the default, and reported a 1M-context model as 131072 — which would
     // compact a session long before it needed to.
     expect(model?.context?.contextWindow).toBe(1_048_576)
-    expect(model?.defaultMaxTokens).toBe(65_536)
+    // Capped: the gateway settles on requested max_tokens, so declaring this
+    // model's full 65,536 would bill every unspecified call for output nobody
+    // asked for. See "the default output cap is a money decision" below.
+    expect(model?.defaultMaxTokens).toBe(8_192)
     expect(model?.name).toBe('DeepSeek V4 Flash Chat')
     expect(model?.provider).toBe('blockrun')
   })
@@ -172,5 +175,33 @@ describe('reasoning efforts', () => {
     const [model] = projectCatalog('blockrun', { data: [{ id: 'xai/grok-4.5', categories: ['chat', 'reasoning'] }] })
     expect(model?.reasoning?.efforts).toHaveLength(2)
     expect(model?.inputModalities).toEqual(['text'])
+  })
+})
+
+describe('the default output cap is a money decision', () => {
+  // This gateway quotes on the max_tokens you REQUEST and settles that amount,
+  // not what the model returns. Measured on anthropic/claude-opus-5: capped at
+  // its advertised 128,000 max_output a request quotes $0.3211, against
+  // $0.0216 with no cap and $0.0036 capped at 1,000. Declaring the advertised
+  // ceiling as the default billed 89x for output nobody asked for.
+  it('caps the default well below a large advertised max_output', () => {
+    const [model] = projectCatalog('blockrun', {
+      data: [{ id: 'anthropic/claude-opus-5', categories: ['chat'], max_output: 128_000 }],
+    })
+    expect(model?.defaultMaxTokens).toBe(8_192)
+  })
+
+  it('leaves a model that advertises less than the ceiling alone', () => {
+    const [model] = projectCatalog('blockrun', {
+      data: [{ id: 'x', categories: ['chat'], max_output: 4_096 }],
+    })
+    expect(model?.defaultMaxTokens).toBe(4_096)
+  })
+
+  it('takes a caller-supplied ceiling, for workloads that need long replies', () => {
+    const [model] = projectCatalog('blockrun', {
+      data: [{ id: 'x', categories: ['chat'], max_output: 128_000 }],
+    }, undefined, 32_000)
+    expect(model?.defaultMaxTokens).toBe(32_000)
   })
 })

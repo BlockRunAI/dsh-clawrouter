@@ -33,6 +33,23 @@ export const DEFAULT_CONTEXT_WINDOW = 131_072
 /** Output capability assumed for a model the catalog does not size. */
 export const DEFAULT_MAX_TOKENS = 8_192
 
+/**
+ * Ceiling applied to a model's advertised `max_output` when choosing the
+ * default output cap.
+ *
+ * This gateway quotes on the max_tokens you REQUEST, not the tokens the model
+ * returns, and settles the quoted amount. Declaring a model's full `max_output`
+ * as the default therefore bills every unspecified call for output nobody
+ * asked for. Measured on `anthropic/claude-opus-5`: a request capped at its
+ * advertised 128,000 quotes $0.3211, against $0.0216 with no cap at all and
+ * $0.0036 capped at 1,000 — an 89-fold difference decided by a field the
+ * caller never set.
+ *
+ * A model that genuinely needs to emit more than this takes an explicit
+ * `maxTokens` from the caller, which is quoted and paid for deliberately.
+ */
+export const DEFAULT_MAX_TOKENS_CEILING = 8_192
+
 /** Input modalities for an entry the gateway does not tag `vision`. */
 const TEXT_ONLY: readonly ModelModality[] = ['text']
 
@@ -113,6 +130,7 @@ export class BlockrunCatalog {
     private readonly baseURL: string,
     private readonly now: () => number = Date.now,
     private readonly visionModels: readonly string[] = VERIFIED_VISION_MODELS,
+    private readonly maxOutputCeiling: number = DEFAULT_MAX_TOKENS_CEILING,
   ) {}
 
   /** Published rates from the last successful read, by model id. */
@@ -218,7 +236,7 @@ export class BlockrunCatalog {
       )
     }
     const body: unknown = await response.json()
-    const models = projectCatalog(this.provider, body, this.visionModels)
+    const models = projectCatalog(this.provider, body, this.visionModels, this.maxOutputCeiling)
     this.#cache = { models, rates: projectRates(body), fetchedAt: this.now() }
     return models
   }
@@ -238,6 +256,7 @@ export function projectCatalog(
   provider: string,
   body: unknown,
   visionModels: readonly string[] = VERIFIED_VISION_MODELS,
+  maxOutputCeiling: number = DEFAULT_MAX_TOKENS_CEILING,
 ): readonly LlmResolvedModelInfo[] {
   const data = (body as { data?: unknown })?.data
   const entries: unknown[] = Array.isArray(data) ? data : Array.isArray(body) ? body : []
@@ -247,7 +266,7 @@ export function projectCatalog(
     const model = entry as BlockrunCatalogModel
     if (typeof model.id !== 'string' || model.id.length === 0) continue
     if (!isChatCapable(model)) continue
-    models.push(projectModel(provider, model, visionModels))
+    models.push(projectModel(provider, model, visionModels, maxOutputCeiling))
   }
   return models
 }
@@ -283,6 +302,7 @@ function projectModel(
   provider: string,
   model: BlockrunCatalogModel,
   visionModels: readonly string[],
+  maxOutputCeiling: number,
 ): LlmResolvedModelInfo {
   const description = model.description
   return {
@@ -297,7 +317,7 @@ function projectModel(
     context: {
       contextWindow: positive(model.context_window) ?? positive(model.context_length) ?? DEFAULT_CONTEXT_WINDOW,
     },
-    defaultMaxTokens: positive(model.max_output) ?? DEFAULT_MAX_TOKENS,
+    defaultMaxTokens: Math.min(positive(model.max_output) ?? DEFAULT_MAX_TOKENS, maxOutputCeiling),
   }
 }
 
