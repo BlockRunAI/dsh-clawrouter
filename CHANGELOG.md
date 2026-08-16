@@ -4,6 +4,12 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## Unreleased
+
+### Fixed
+- **The review gate asked for output it never used, and paid for it.** The gateway settles on the `max_tokens` a request asks for, so an uncapped review was billed at four times the price of the two-field JSON verdict it produces: $0.0249 against $0.0057 on `anthropic/claude-opus-5`, every time the gate fired. Reviews now ask for 512 tokens, configurable as `reviewerMaxTokens`. Raise it only if verdict reasons are being truncated.
+- **The documented cost of a review was stale.** The README said $0.0048; the measured figure at the new cap is $0.0057, and on 0.9.0 — where the reviewer inherited Opus's advertised 128,000-token output — it was $0.28–0.33. Thanks to [Rosecheng7](https://github.com/BlockRunAI/dsh-clawrouter/issues/1) for reporting the gap between the table and the wallet.
+
 ## 0.10.0 — 2026-08-15
 
 ### Fixed

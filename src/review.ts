@@ -53,6 +53,21 @@ export const DEFAULT_REVIEW_TIMEOUT_MS = 30_000
  */
 export const MAX_REVIEWER_RESPONSE_CHARS = 16_384
 
+/**
+ * Output cap requested for one review.
+ *
+ * This gateway quotes on the `max_tokens` a request ASKS for and settles that
+ * amount whichever way the model answers, so an uncapped review is billed for
+ * output a verdict never uses. Measured on `anthropic/claude-opus-5` with a
+ * real review prompt: $0.0249 uncapped against $0.0057 at this value — four
+ * times the cost of a two-field JSON verdict, every time the gate fires.
+ *
+ * 512 tokens is roughly 2,000 characters, far beyond any verdict the system
+ * prompt asks for. A model that somehow exceeds it produces an unparseable
+ * verdict, which escalates to a human rather than passing anything through.
+ */
+export const DEFAULT_REVIEWER_MAX_TOKENS = 512
+
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'blockrun-review'
 
@@ -81,6 +96,14 @@ export interface Config {
   /** Milliseconds one review may take before falling through to {@link Config.onReviewerFailure}. */
   timeoutMs?: number
   /**
+   * Output cap requested for one review.
+   *
+   * Charged whether or not the verdict uses it, because the gateway settles on
+   * requested rather than produced tokens. Raise it only if verdict reasons are
+   * being truncated. See {@link DEFAULT_REVIEWER_MAX_TOKENS}.
+   */
+  reviewerMaxTokens?: number
+  /**
    * What an unreachable, slow, or unreadable reviewer means.
    *
    * `ask` escalates to the human approver and is the default: silently
@@ -103,6 +126,7 @@ export const Config: z<Config> = z.object({
   reviewerProvider: z.string().default('blockrun'),
   reviewerModel: z.string().default(DEFAULT_REVIEWER_MODEL),
   timeoutMs: z.natural().default(DEFAULT_REVIEW_TIMEOUT_MS),
+  reviewerMaxTokens: z.natural().default(DEFAULT_REVIEWER_MAX_TOKENS),
   onReviewerFailure: z.union(['ask', 'deny'] as const).default('ask'),
   extraRules: z.array(z.object({
     name: z.string().required(),
@@ -122,6 +146,12 @@ export function apply(ctx: Context, config: Config): void {
   const timeoutMs = config.timeoutMs !== undefined && config.timeoutMs > 0
     ? config.timeoutMs
     : DEFAULT_REVIEW_TIMEOUT_MS
+  // Zero is a valid natural number and an impossible output cap: a request for
+  // no tokens is paid for and answers nothing, so it reads as "unset" here
+  // rather than being sent, the same way `timeoutMs` treats it.
+  const reviewerMaxTokens = config.reviewerMaxTokens !== undefined && config.reviewerMaxTokens > 0
+    ? config.reviewerMaxTokens
+    : DEFAULT_REVIEWER_MAX_TOKENS
   const onFailure = config.onReviewerFailure ?? 'ask'
   const rules = [...DEFAULT_RISK_RULES, ...compileExtraRules(config.extraRules ?? [])]
   // Reported once, not per call: a misconfigured reviewer fails on every risky
@@ -139,6 +169,7 @@ export function apply(ctx: Context, config: Config): void {
         source: { kind: 'plugin', plugin: name },
       })],
       signal,
+      maxTokens: reviewerMaxTokens,
     }
     let text = ''
     for await (const chunk of ctx.llm.stream(request)) {

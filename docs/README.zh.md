@@ -109,9 +109,11 @@ dsh plugin --profile web add dsh-clawrouter
 | 危险命令漏掉 | **0/39** —— 覆盖 git、容器、集群、云存储、数据库、主机状态 |
 | 抓「以后才执行」的文件 | git hooks、CI workflow、shell 启动文件、launch agent、`.gitconfig`、`.env`、npm `postinstall`、sandbox 提权 —— 10/10，15 条日常文件操作 0 误报 |
 | 抗绕过 | `\rm -rf /`、`command rm`、`env rm`、`eval "rm -rf $DIR"`、`bash -c "…"`、`\| xargs rm`，以及管进 shell 的 heredoc |
-| 触发时的费用 | `claude-opus-5` 上 **$0.0048**，便宜的审查模型 $0.002 |
+| 触发时的费用 | `claude-opus-5` 上 **$0.0057** —— 这是 512 token 输出上限下的价格，不设上限是 $0.0249 |
 | 触发时的延迟 | 约 3 秒 |
 | 审查模型看到什么 | 约 356 token —— 只有那一次被标记的调用，**不是你的会话** |
+
+**这个数字取决于输出上限。** 这条网关是按请求报价的——输入大小加上请求里写的 `max_tokens`——并且不管模型实际吐出多少，都按这个额度结算；所以一次审查申请了却用不上的输出空间，每次触发都要照付。`reviewerMaxTokens`（512）就是让一个两字段的 JSON 裁决按它自己的体量收费。0.10.0 之前，审查请求继承的是 `claude-opus-5` 自报的 128,000 输出上限，单次要 **$0.28–0.33**；如果你还在更早的版本上，请升级，而不是换一个更弱的审查模型。
 
 也就是说：**日常工作里它是隐形的** —— 不加延迟、不花钱、不弹窗；只在真正值得看一眼的命令上花掉大约半分钱。「32 条零触发」这个数字有测试守着，将来哪条新规则开始拦 `npm test`，会挂在 CI 上，而不是挂在你的会话里。
 
@@ -263,6 +265,7 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 | `reviewerProvider` | `blockrun` | 审查模型所在的路由 |
 | `reviewerModel` | `anthropic/claude-opus-5` | 要选一个和智能体**不同且更强**的模型 |
 | `timeoutMs` | `30000` | 单次审查的时间上限 |
+| `reviewerMaxTokens` | `512` | 单次审查请求的输出上限；用不用得到都要付钱 |
 | `onReviewerFailure` | `ask` | `ask` 交给你；`deny` 直接拒绝（无人值守） |
 | `extraRules` | `[]` | 追加的 `{name, pattern, tools}` 风险规则 |
 

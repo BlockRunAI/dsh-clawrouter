@@ -111,9 +111,11 @@ Measured, because this is the question that decides whether you keep it enabled:
 | Misses dangerous work | **none** of 39, across git, containers, clusters, cloud storage, databases, and host state |
 | Catches files that execute later | git hooks, CI workflows, shell startup files, launch agents, `.gitconfig`, `.env`, npm `postinstall`, sandbox escalation — 10 of 10, 0 false positives across 15 ordinary file edits |
 | Survives evasion | `\rm -rf /`, `command rm`, `env rm`, `eval "rm -rf $DIR"`, `bash -c "…"`, `\| xargs rm`, and heredocs piped into a shell |
-| Cost when it does fire | **$0.0048** on `claude-opus-5`, $0.002 on cheaper reviewers |
+| Cost when it does fire | **$0.0057** on `claude-opus-5`, at the 512-token reviewer cap — $0.0249 without it |
 | Latency when it does fire | ~3s |
 | What the reviewer sees | ~356 tokens — the flagged call, not your conversation |
+
+**That figure depends on the cap.** This gateway quotes from the request — input size plus the `max_tokens` asked for — and settles that amount whichever way the model answers, so a review that asks for room it never uses pays for it every time the gate fires. `reviewerMaxTokens` (512) is what keeps a two-field JSON verdict priced like one. Before 0.10.0 the reviewer inherited `claude-opus-5`'s advertised 128,000-token output and cost **$0.28–0.33** per review; if you are on an earlier version, upgrade rather than switching to a weaker reviewer.
 
 So during normal work it is invisible: no latency, no cost, no prompts. It bills roughly half a cent on the rare command that deserves a second opinion. Both corpora are tests, so a rule that starts flagging `npm test` — or stops flagging `kubectl delete namespace` — fails CI rather than your session.
 
@@ -269,6 +271,7 @@ Off by default, and it only ever affects calls the harness itself marks as maint
 | `reviewerProvider` | `blockrun` | provider route carrying the reviewer |
 | `reviewerModel` | `anthropic/claude-opus-5` | use a *different, stronger* model than the agent |
 | `timeoutMs` | `30000` | how long one review may take |
+| `reviewerMaxTokens` | `512` | output cap asked for per review, and billed whether or not it is used |
 | `onReviewerFailure` | `ask` | `ask` escalates to you; `deny` blocks (unattended runs) |
 | `extraRules` | `[]` | additional `{name, pattern, tools}` risk rules |
 

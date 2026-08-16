@@ -28,11 +28,14 @@ let root: string | undefined
 let context: Context | undefined
 /** Every prompt the stub reviewer was asked, so "was it consulted?" is observable. */
 let asked: string[] = []
+/** The output cap carried by each reviewer request, which is what the gateway bills. */
+let capped: (number | undefined)[] = []
 
 afterEach(async () => {
   await context?.fiber.dispose()
   context = undefined
   asked = []
+  capped = []
   if (root !== undefined) await rm(root, { recursive: true, force: true })
   root = undefined
 })
@@ -46,6 +49,7 @@ let behavior: ReviewerBehavior = { kind: 'reply', text: '{"ruling":"safe","reaso
 class StubAdapter extends LlmAdapter {
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     asked.push(options.messages.map(m => m.content.map(b => b.type === 'text' ? b.text : '').join('')).join('\n'))
+    capped.push(options.maxTokens)
     if (behavior.kind === 'throw') throw new Error('reviewer offline')
     if (behavior.kind === 'hang') {
       // Settles only on abort. The `aborted` check is not belt-and-braces: by
@@ -343,6 +347,29 @@ describe('the gate only ever narrows', () => {
     expect(text(result)).toContain(DOWNSTREAM_REASON)
     expect(ran).toEqual([])
     downstreamDenies = false
+  }, 30_000)
+})
+
+describe('what a review costs', () => {
+  it('asks for a capped output, because the gateway settles on tokens requested', async () => {
+    // Not a micro-optimisation: this gateway quotes from the request and
+    // settles that amount whichever way the model answers, so an uncapped
+    // review pays for output no verdict ever uses, every time the gate fires.
+    behavior = { kind: 'reply', text: '{"ruling":"safe","reason":"Scoped to build output."}' }
+    const ctx = await boot(ENABLED)
+
+    await callBash(ctx, 'rm -rf ./dist')
+
+    expect(capped).toEqual([Review.DEFAULT_REVIEWER_MAX_TOKENS])
+  }, 30_000)
+
+  it('sends the configured cap when one is set', async () => {
+    behavior = { kind: 'reply', text: '{"ruling":"safe","reason":"Scoped to build output."}' }
+    const ctx = await boot([...ENABLED, '    reviewerMaxTokens: 1200'])
+
+    await callBash(ctx, 'rm -rf ./dist')
+
+    expect(capped).toEqual([1200])
   }, 30_000)
 })
 
