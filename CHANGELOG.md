@@ -4,7 +4,7 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## Unreleased
+## 0.10.1 — 2026-08-16
 
 ### Fixed
 - **The review gate asked for output it never used, and paid for it.** The gateway settles on the `max_tokens` a request asks for, so an uncapped review was billed at four times the price of the two-field JSON verdict it produces: $0.0249 against $0.0057 on `anthropic/claude-opus-5`, every time the gate fired. Reviews now ask for 512 tokens, configurable as `reviewerMaxTokens`. Raise it only if verdict reasons are being truncated.
