@@ -4,9 +4,9 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## Unreleased
+## 0.10.2 — 2026-08-30
 
-### Changed
+### Fixed
 - **The default `visionModels` was four models; the gateway now serves images on thirty-one.** The verified set was measured on 2026-08-16, when OpenAI returned HTTP 400 after payment, xAI 503, and Anthropic relayed an upstream error as the model's answer. Re-measured on 2026-08-30 with the same inline PNG against every tagged chat model: 31 of 37 answer correctly, including every Anthropic, Google, xAI and Z.ai entry. The default now lists all thirty-one, so an image sent to `anthropic/claude-sonnet-5` or `openai/gpt-5.5` is no longer refused by the harness as unsupported. Still excluded, because each failure is paid for: `openai/gpt-5.2-pro`, `gpt-5.4-pro` and `gpt-5.5-pro` drop the image and answer as if none was sent, `gpt-5.6-luna-pro` returns HTTP 500 after payment, and both NVIDIA Nemotron entries answer wrongly or rate-limit. Raised by [Rosecheng7](https://github.com/BlockRunAI/dsh-clawrouter/issues/2), whose harness could only reach four models with an attachment.
 
 ## 0.10.1 — 2026-08-16
@@ -114,7 +114,7 @@ Entries say what changed for *you*, and what it meant when it was wrong — most
 - **`npm run sync:models`** rewrites every marker from the live catalog, counting through `projectCatalog` so the figure is what this route exposes rather than what the gateway lists. It refuses to write `0`.
 - **Two gates, split by what each can know.** An offline test asserts every marker agrees with the others, catching a hand-edit of one site; a live e2e test asserts the count matches the gateway and names `sync:models` in its failure message. Both were fed their bug and rejected it.
 
-### Changed
+### Fixed
 - `tsx` is a devDependency, so a maintenance script can import the plugin's own catalog projection instead of restating the filter in JavaScript.
 
 
