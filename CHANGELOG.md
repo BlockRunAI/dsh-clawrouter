@@ -114,7 +114,7 @@ Entries say what changed for *you*, and what it meant when it was wrong — most
 - **`npm run sync:models`** rewrites every marker from the live catalog, counting through `projectCatalog` so the figure is what this route exposes rather than what the gateway lists. It refuses to write `0`.
 - **Two gates, split by what each can know.** An offline test asserts every marker agrees with the others, catching a hand-edit of one site; a live e2e test asserts the count matches the gateway and names `sync:models` in its failure message. Both were fed their bug and rejected it.
 
-### Fixed
+### Changed
 - `tsx` is a devDependency, so a maintenance script can import the plugin's own catalog projection instead of restating the filter in JavaScript.
 
 
