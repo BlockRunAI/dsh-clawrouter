@@ -4,6 +4,11 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## Unreleased
+
+### Changed
+- **The default `visionModels` was four models; the gateway now serves images on thirty-one.** The verified set was measured on 2026-08-16, when OpenAI returned HTTP 400 after payment, xAI 503, and Anthropic relayed an upstream error as the model's answer. Re-measured on 2026-08-30 with the same inline PNG against every tagged chat model: 31 of 37 answer correctly, including every Anthropic, Google, xAI and Z.ai entry. The default now lists all thirty-one, so an image sent to `anthropic/claude-sonnet-5` or `openai/gpt-5.5` is no longer refused by the harness as unsupported. Still excluded, because each failure is paid for: `openai/gpt-5.2-pro`, `gpt-5.4-pro` and `gpt-5.5-pro` drop the image and answer as if none was sent, `gpt-5.6-luna-pro` returns HTTP 500 after payment, and both NVIDIA Nemotron entries answer wrongly or rate-limit. Raised by [Rosecheng7](https://github.com/BlockRunAI/dsh-clawrouter/issues/2), whose harness could only reach four models with an attachment.
+
 ## 0.10.1 — 2026-08-16
 
 ### Fixed

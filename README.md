@@ -6,7 +6,7 @@
 
 <p>DeepSeek is fast and cheap — keep it for the loop.<br><br>
 <strong>This adds what it cannot do: a stronger model reviews the dangerous command before it runs.</strong><br><br>
-<em><!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models from one wallet. No accounts. No API keys. No credit card.</em></p>
+<em><!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> models from one wallet. No accounts. No API keys. No credit card.</em></p>
 
 <br>
 
@@ -31,7 +31,7 @@ English | [中文](https://github.com/BlockRunAI/dsh-clawrouter/blob/main/docs/R
 
 </div>
 
-> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models) is reachable from one wallet with no accounts and no API keys, paid per request in USDC over [x402](https://x402.org). MIT licensed.
+> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> models) is reachable from one wallet with no accounts and no API keys, paid per request in USDC over [x402](https://x402.org). MIT licensed.
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -187,20 +187,19 @@ DeepSeek serves no vision model, so this is capability rather than savings. Atta
 ```yaml
 - id: blockrun-llm
   config:
-    visionModels: [google/gemini-3.5-flash]   # the default; widen as you verify
+    visionModels: [google/gemini-3.5-flash]   # narrows the measured default; widen as you verify
 ```
 
-**The gateway's `vision` tag is not sufficient, so this plugin does not trust it.** Thirty-five entries carry it. Ten were sent the same inline PNG and asked its colour:
+**The gateway's `vision` tag is not sufficient, so this plugin does not trust it.** Every tagged chat model is sent the same inline PNG and asked its colour, and only the ones that answer correctly are offered image input. Measured 2026-08-30, 31 of 37 answered:
 
-| Model | Result |
+| Result | Models |
 |---|---|
-| `google/gemini-2.5-flash`, `gemini-3.5-flash`, `gemini-3.6-flash` | answered correctly |
-| `moonshot/kimi-k3` | answered correctly |
-| `openai/gpt-4o`, `gpt-4.1`, `gpt-5.6-sol` | **HTTP 400 after taking payment** |
-| `xai/grok-4.5` | HTTP 503 after taking payment |
-| `anthropic/claude-sonnet-5`, `claude-opus-5` | **HTTP 200, upstream 400 relayed as the model's answer** |
+| answered correctly | every tagged Anthropic, Google, Moonshot, xAI and Z.ai model, and OpenAI's non-`pro` models plus `gpt-5.6-sol-pro` / `gpt-5.6-terra-pro` |
+| **image silently dropped, answer paid for** | `openai/gpt-5.2-pro`, `gpt-5.4-pro`, `gpt-5.5-pro` ("I didn't receive any image") |
+| **HTTP 500 after taking payment** | `openai/gpt-5.6-luna-pro` |
+| wrong answer or HTTP 429 | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, `nemotron-nano-12b-v2-vl` |
 
-Anthropic's is the worst of these. The call returns 200 and streams `[Error: 400 {"message":"Could not process image"}]` as assistant text, so the harness sees an ordinary successful turn and the agent acts on the error string as though the model wrote it. This plugin now detects that exact shape — the whole message being nothing but a relayed error — and finishes the request as a failure with the status mapped as if it had arrived as one. An answer that merely mentions an error, or a turn that also called a tool, is left alone. So a model is offered image input only when the gateway tags it `vision` **and** it appears in `visionModels`, which defaults to the four measured to work. Both signals must agree — the tag alone over-claims, and the list alone would keep claiming vision for a model the gateway has since retagged.
+The first measurement (2026-08-16) was far worse: OpenAI returned HTTP 400 after payment, xAI 503, and Anthropic streamed `[Error: 400 {"message":"Could not process image"}]` as assistant text, so the harness saw an ordinary successful turn and the agent acted on the error string as though the model wrote it. The gateway has since fixed all three, and this plugin still detects that exact shape — the whole message being nothing but a relayed error — and finishes the request as a failure with the status mapped as if it had arrived as one. An answer that merely mentions an error, or a turn that also called a tool, is left alone. So a model is offered image input only when the gateway tags it `vision` **and** it appears in `visionModels`, which defaults to the measured set. Both signals must agree — the tag alone over-claims, and the list alone would keep claiming vision for a model the gateway has since retagged.
 
 Widen it yourself as you verify others; that is a config change, not a release here.
 
@@ -212,7 +211,7 @@ Reasoning models get `high` and `max`, declared per model from the catalog's `re
 
 Asking a model that does not reason at all is a different case, and is refused **locally, before paying**: `openai/gpt-4o` charges and then rejects `reasoning_effort` outright. The catalog says which models qualify, so that costs nothing to discover.
 
-### 7. <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models from one wallet
+### 7. <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> models from one wallet
 
 Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account.
 
@@ -293,7 +292,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 - **Smart routing (`blockrun/auto`) is not wired up**, and not for lack of a router. A virtual model has to report one context window, and the harness sizes compaction from it: report the largest candidate and a turn routed to a smaller model overflows with compaction never firing; report the smallest and every session compacts far too early. Until that has an honest answer, pin a model id — `auxiliaryModel` already moves the expensive maintenance calls, which is where the savings actually were.
 - **Compaction may fire earlier than it needs to.** This route reports the context window the gateway's model catalog declares. Measured against the live gateway, `openai/gpt-4.1-nano` accepted a 450,037-token prompt and recalled a marker from the very first line — no truncation, but 3.5x the 128,000 the catalog states. The harness sizes compaction from the declared figure, so a session can compact while the model would still have taken the whole thing. Reported upstream; this plugin reports what the catalog says rather than guessing higher, because over-claiming would trade early compaction for silent overflow.
 - **Context overflow is detected by request size, not by the error text.** A real overflow comes back from the gateway as `{"message":"API request failed"}` — the provider's wording is sanitized away, so the usual text detectors match nothing. After a 400, a request larger than the model's declared window is therefore treated as an overflow so compaction can recover. The text detectors still run first, so this corrects itself if the gateway stops sanitizing.
-- **Prior-turn reasoning is not sent back.** DeepSeek's thinking-mode guide says `reasoning_content` should be returned on tool-call turns, but this one route serves <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> models from many vendors, and a field one of them requires is a field another may reject. Multi-step tool use on a reasoning model may be slightly degraded as a result; please report it if you hit it.
+- **Prior-turn reasoning is not sent back.** DeepSeek's thinking-mode guide says `reasoning_content` should be returned on tool-call turns, but this one route serves <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> models from many vendors, and a field one of them requires is a field another may reject. Multi-step tool use on a reasoning model may be slightly degraded as a result; please report it if you hit it.
 
 ## Development
 

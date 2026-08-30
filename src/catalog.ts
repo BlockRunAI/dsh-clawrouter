@@ -87,11 +87,13 @@ const VISION_CATEGORY = 'vision'
 /**
  * Models measured to actually accept an image through this gateway.
  *
- * The `vision` tag is not sufficient. Ten tagged models were sent the same
- * inline PNG: Google's and Moonshot's answered correctly, OpenAI's returned
- * HTTP 400 after taking payment, xAI's returned 503, and Anthropic's charged
- * and streamed nothing at all — no error, no content, which reads downstream
- * as a model that simply had nothing to say.
+ * The `vision` tag is not sufficient. Every tagged chat model is sent the
+ * same inline PNG and asked its colour; only the ones that answer correctly
+ * are listed. Measured 2026-08-30: 31 of 37 answered. The six left out fail
+ * in ways the caller pays for: `openai/gpt-5.2-pro`, `gpt-5.4-pro` and
+ * `gpt-5.5-pro` drop the image and answer as if none was sent,
+ * `openai/gpt-5.6-luna-pro` returns HTTP 500 after taking payment, and the
+ * two NVIDIA Nemotron entries either answer wrongly or rate-limit.
  *
  * Declaring image input from the tag would therefore admit an attachment that
  * fails mid-turn, after the message is durable, having already been paid for.
@@ -99,10 +101,37 @@ const VISION_CATEGORY = 'vision'
  * improves, without waiting for a release here.
  */
 export const VERIFIED_VISION_MODELS: readonly string[] = [
+  'anthropic/claude-fable-5',
+  'anthropic/claude-haiku-4.5',
+  'anthropic/claude-opus-4.5',
+  'anthropic/claude-opus-4.7',
+  'anthropic/claude-opus-4.8',
+  'anthropic/claude-opus-5',
+  'anthropic/claude-sonnet-4.5',
+  'anthropic/claude-sonnet-4.6',
+  'anthropic/claude-sonnet-5',
   'google/gemini-2.5-flash',
+  'google/gemini-2.5-pro',
+  'google/gemini-3-flash-preview',
+  'google/gemini-3.1-pro',
   'google/gemini-3.5-flash',
   'google/gemini-3.6-flash',
   'moonshot/kimi-k3',
+  'openai/chat-latest',
+  'openai/gpt-4.1',
+  'openai/gpt-4o',
+  'openai/gpt-5.2',
+  'openai/gpt-5.4',
+  'openai/gpt-5.4-mini',
+  'openai/gpt-5.5',
+  'openai/gpt-5.6-luna',
+  'openai/gpt-5.6-sol',
+  'openai/gpt-5.6-sol-pro',
+  'openai/gpt-5.6-terra',
+  'openai/gpt-5.6-terra-pro',
+  'xai/grok-4.3',
+  'xai/grok-4.5',
+  'zai/glm-5.3-flash',
 ]
 
 /** The capability tag marking an entry this route can actually converse with. */

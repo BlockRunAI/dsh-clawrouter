@@ -6,7 +6,7 @@
 
 <p>DeepSeek 又快又便宜，主循环就该继续用它。<br><br>
 <strong>这个插件补的是它做不到的事：危险命令执行前，让更强的模型先审一遍。</strong><br><br>
-<em>一个钱包直调 <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个模型。不注册账号，不用 API Key，不用信用卡。</em></p>
+<em>一个钱包直调 <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> 个模型。不注册账号，不用 API Key，不用信用卡。</em></p>
 
 <br>
 
@@ -31,7 +31,7 @@
 
 </div>
 
-> **dsh-clawrouter** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，把一个更强的模型放在智能体危险操作的前面。当智能体准备执行 `rm -rf ~`，审查模型会读一遍并给出放行 / 拒绝 / 交给你——由真实的工具执行器强制执行，而不是靠提示词劝阻。它同时注册一条 BlockRun provider 路由，让审查模型（以及全部 <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个模型）都能用一个钱包直接调用：不注册账号、不用 API Key，通过 [x402](https://x402.org) 用 USDC 按次付费。MIT 许可。
+> **dsh-clawrouter** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，把一个更强的模型放在智能体危险操作的前面。当智能体准备执行 `rm -rf ~`，审查模型会读一遍并给出放行 / 拒绝 / 交给你——由真实的工具执行器强制执行，而不是靠提示词劝阻。它同时注册一条 BlockRun provider 路由，让审查模型（以及全部 <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> 个模型）都能用一个钱包直接调用：不注册账号、不用 API Key，通过 [x402](https://x402.org) 用 USDC 按次付费。MIT 许可。
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -181,20 +181,19 @@ DeepSeek 没有任何视觉模型，所以这是**能力**，不是省钱。贴�
 ```yaml
 - id: blockrun-llm
   config:
-    visionModels: [google/gemini-3.5-flash]   # 默认值；自己验证过就可以加
+    visionModels: [google/gemini-3.5-flash]   # 收窄实测默认值；自己验证过就可以加
 ```
 
-**网关的 `vision` 标签不足以采信，所以本插件不信它。** 带这个标签的有 35 个。我给其中 10 个发了同一张内联 PNG，问它是什么颜色：
+**网关的 `vision` 标签不足以采信，所以本插件不信它。** 每个带标签的聊天模型都会收到同一张内联 PNG 并被问它是什么颜色，只有答对的才会被声明支持图片输入。2026-08-30 实测，37 个里 31 个答对：
 
-| 模型 | 结果 |
+| 结果 | 模型 |
 |---|---|
-| `google/gemini-2.5-flash`、`gemini-3.5-flash`、`gemini-3.6-flash` | 答对 |
-| `moonshot/kimi-k3` | 答对 |
-| `openai/gpt-4o`、`gpt-4.1`、`gpt-5.6-sol` | **收了钱之后 HTTP 400** |
-| `xai/grok-4.5` | 收了钱之后 HTTP 503 |
-| `anthropic/claude-sonnet-5`、`claude-opus-5` | **HTTP 200，把上游的 400 当作模型回答返回** |
+| 答对 | 所有带标签的 Anthropic、Google、Moonshot、xAI、Z.ai 模型，以及 OpenAI 的非 `pro` 模型加 `gpt-5.6-sol-pro` / `gpt-5.6-terra-pro` |
+| **图片被静默丢弃，回答照样收费** | `openai/gpt-5.2-pro`、`gpt-5.4-pro`、`gpt-5.5-pro`（"我没有收到任何图片"） |
+| **收了钱之后 HTTP 500** | `openai/gpt-5.6-luna-pro` |
+| 答错或 HTTP 429 | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`、`nemotron-nano-12b-v2-vl` |
 
-Anthropic 那种最糟。请求返回 200，然后把 `[Error: 400 {"message":"Could not process image"}]` 当作**助手文本**流回来——于是 harness 看到的是一次完全正常的成功轮次，智能体会把这串报错当成模型写的内容去执行。本插件现在会识别这个确切形状（整条消息除了一个转发来的报错之外什么都没有），并把这次请求判为失败，状态码按它本该以 HTTP 形式到达时的方式映射。如果回答只是**提到**了某个错误，或者这一轮还调用了工具，则不会被改判。所以只有当网关给它打了 `vision` 标签**并且**它出现在 `visionModels` 里时，这个模型才会被声明支持图片输入。两个信号必须同时成立——只信标签会过度声称，只信列表则会在网关改标签之后继续声称。
+第一次实测（2026-08-16）要糟得多：OpenAI 收了钱之后返回 HTTP 400，xAI 返回 503，Anthropic 把 `[Error: 400 {"message":"Could not process image"}]` 当作**助手文本**流回来——于是 harness 看到的是一次完全正常的成功轮次，智能体会把这串报错当成模型写的内容去执行。网关此后把这三种都修好了，本插件仍会识别这个确切形状（整条消息除了一个转发来的报错之外什么都没有），并把这次请求判为失败，状态码按它本该以 HTTP 形式到达时的方式映射。如果回答只是**提到**了某个错误，或者这一轮还调用了工具，则不会被改判。所以只有当网关给它打了 `vision` 标签**并且**它出现在 `visionModels` 里时，这个模型才会被声明支持图片输入，默认值就是实测集合。两个信号必须同时成立——只信标签会过度声称，只信列表则会在网关改标签之后继续声称。
 
 自己验证过其他模型就往里加；那是改配置，不需要等这边发版。
 
@@ -206,7 +205,7 @@ Anthropic 那种最糟。请求返回 200，然后把 `[Error: 400 {"message":"C
 
 但**完全不会推理的模型**是另一回事，会在**付款之前本地拒绝**：`openai/gpt-4o` 会先收钱再拒绝 `reasoning_effort`。catalog 里写明了哪些模型合格，所以这个判断不花钱。
 
-### 7. 一个钱包，<!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个模型
+### 7. 一个钱包，<!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> 个模型
 
 注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
 
@@ -287,7 +286,7 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 - **智能路由（`blockrun/auto`）尚未接入**，缺的不是路由器。虚拟模型必须报告**一个**上下文窗口，而 Harness 用它来决定何时压缩：报最大的，某一轮路由到小模型时会直接溢出且压缩永不触发；报最小的，所有会话都会过早压缩。在这个问题有诚实答案之前，请直接指定模型 id —— `auxiliaryModel` 已经把真正花钱的维护调用挪走了，省钱的部分本来就在那里。
 - **压缩可能比需要的时机更早触发。** 本路由报告的是网关模型目录里声明的上下文窗口。对着真实网关实测：`openai/gpt-4.1-nano` 接受了 **450,037** token 的输入，并正确复述了第一行的标记——没有截断，但这是目录声明的 128,000 的 3.5 倍。Harness 是按声明值来决定何时压缩的，所以会话可能在模型其实还吃得下的时候就压缩了。已向上游反馈；本插件如实报告目录的值而不是往高了猜——猜高了就是拿「提前压缩」换「静默溢出」。
 - **上下文溢出是靠请求大小判定的，不是靠错误文案。** 真实溢出从网关返回的是 `{"message":"API request failed"}`——厂商原始文案被清洗掉了，常规的文本检测器什么都匹配不到。所以在收到 400 之后，如果请求本身已经超过该模型声明的窗口，就按溢出处理，好让压缩能够恢复。文本检测器仍然优先，所以网关哪天不再清洗，这里会自动回到正轨。
-- **上一轮的 reasoning 不会回传。** DeepSeek 的思考模式文档要求在带 tool call 的轮次回传 `reasoning_content`，但这一条路由要服务 <!-- br:models.chatVisible -->67<!-- /br:models.chatVisible --> 个来自不同厂商的模型——某一家要求的字段，另一家可能直接拒绝。所以推理模型配合多步工具调用时效果可能略有下降，遇到了请反馈。
+- **上一轮的 reasoning 不会回传。** DeepSeek 的思考模式文档要求在带 tool call 的轮次回传 `reasoning_content`，但这一条路由要服务 <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> 个来自不同厂商的模型——某一家要求的字段，另一家可能直接拒绝。所以推理模型配合多步工具调用时效果可能略有下降，遇到了请反馈。
 
 ## 开发
 

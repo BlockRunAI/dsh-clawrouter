@@ -62,12 +62,12 @@ describe('projectCatalog', () => {
   })
 
   it('keeps a vision-TAGGED model text-only when it is not on the verified list', () => {
-    // The tag over-claims. Sent the same inline PNG, this model returned HTTP
-    // 400 after taking payment; Anthropic's charged and streamed nothing at
-    // all. Trusting the tag would admit an attachment that fails mid-turn,
-    // after the message is durable and the call is paid for.
+    // The tag over-claims. Sent the same inline PNG, this model dropped the
+    // image and answered "I didn't receive any image", and the turn was
+    // paid for. Trusting the tag would admit an attachment that fails
+    // mid-turn, after the message is durable and the call is paid for.
     const [model] = projectCatalog('blockrun', {
-      data: [{ id: 'openai/gpt-4o', categories: ['chat', 'vision'] }],
+      data: [{ id: 'openai/gpt-5.2-pro', categories: ['chat', 'vision'] }],
     })
     expect(model?.inputModalities).toEqual(['text'])
   })
@@ -83,8 +83,8 @@ describe('projectCatalog', () => {
 
   it('takes a caller-supplied list, so a fixed gateway needs no release here', () => {
     const [model] = projectCatalog('blockrun', {
-      data: [{ id: 'openai/gpt-4o', categories: ['chat', 'vision'] }],
-    }, ['openai/gpt-4o'])
+      data: [{ id: 'openai/gpt-5.2-pro', categories: ['chat', 'vision'] }],
+    }, ['openai/gpt-5.2-pro'])
     expect(model?.inputModalities).toEqual(['text', 'image'])
   })
 
