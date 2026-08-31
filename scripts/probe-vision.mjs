@@ -235,13 +235,20 @@ for (const model of candidates) {
   const verdict = wins === COLOURS.length ? 'PASS' : 'FAIL'
   if (verdict === 'PASS') passed.push(model.id)
   const tier = model.billing_mode === 'free' ? ' [free]' : ''
-  const substitutes = [...new Set(results.flatMap(result => result.served ?? []))]
+  // Counted per served id, not collected into a set: "answered as X" leaves
+  // the reader guessing whether that happened once or every time, and the two
+  // mean different things — one is a cascade twitch, the other is a model that
+  // is simply never reached.
+  const substitutes = new Map()
+  for (const result of results) {
+    for (const id of result.served ?? []) substitutes.set(id, (substitutes.get(id) ?? 0) + 1)
+  }
   console.log(`${verdict}  ${model.id}${tier}  ${wins}/${COLOURS.length}`)
   for (const result of results) {
     if (!result.ok) console.log(`        ${result.colour.name} -> ${result.note}`)
   }
-  if (substitutes.length > 0) {
-    console.log(`        NOT MEASURED: the gateway answered as ${substitutes.join(', ')} — this says nothing about ${model.id}`)
+  for (const [id, count] of substitutes) {
+    console.log(`        NOT MEASURED: answered as ${id} on ${count} of ${COLOURS.length} — says nothing about ${model.id}`)
   }
 }
 

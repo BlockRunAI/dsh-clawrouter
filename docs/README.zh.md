@@ -196,14 +196,18 @@ DeepSeek 没有任何视觉模型，所以这是**能力**，不是省钱。贴�
     visionModels: [google/gemini-3.5-flash]   # 收窄实测默认值；自己验证过就可以加
 ```
 
-**网关的 `vision` 标签不足以采信，所以本插件不信它。** 每个带标签的聊天模型都会收到同一张内联 PNG 并被问它是什么颜色，只有答对的才会被声明支持图片输入。2026-08-30 实测，37 个里 31 个答对：
+**网关的 `vision` 标签不足以采信，所以本插件不信它。** 每个带标签的聊天模型都会收到一张纯色 PNG 并被问它是什么颜色，而且要连问**三种不同颜色**——只问一种是能蒙的——三次全对才会被声明支持图片输入。你可以用 `npm run probe:vision` 自己重测，它会直接打印可粘贴的名单。2026-08-31 实测，40 个里 34 个答对：
 
 | 结果 | 模型 |
 |---|---|
-| 答对 | 所有带标签的 Anthropic、Google、Moonshot、xAI、Z.ai 模型，以及 OpenAI 的非 `pro` 模型加 `gpt-5.6-sol-pro` / `gpt-5.6-terra-pro` |
-| **图片被静默丢弃，回答照样收费** | `openai/gpt-5.2-pro`、`gpt-5.4-pro`、`gpt-5.5-pro`（"我没有收到任何图片"） |
-| **收了钱之后 HTTP 500** | `openai/gpt-5.6-luna-pro` |
-| 答错或 HTTP 429 | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`、`nemotron-nano-12b-v2-vl` |
+| 答对 | 所有带标签的 Anthropic、Google、Moonshot、xAI、Z.ai 模型；OpenAI 的非 `pro` 模型加 `gpt-5.6-sol-pro`、`gpt-5.6-terra-pro`，以及现在的 `gpt-5.6-luna-pro`；还有 `deepseek/deepseek-v4-flash-vision-exp` 和 `xiaomi/mimo-v2.5` |
+| **拒收图片**——三次全部 `INVALID_REQUEST` | `openai/gpt-5.2-pro`、`gpt-5.4-pro`、`gpt-5.5-pro` |
+| 回答说没收到图片 | `nvidia/llama-3.2-11b-vision` |
+| **根本没测到——是别的模型在回答** | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`（由 `nemotron-3-nano-30b` 应答）、`qwen/qwen3.8-flash`（由 `qwen3.7-flash` 应答） |
+
+最后一行是你自己往名单里加东西之前最该看懂的。这两个不是「不行」，是**根本没被接通**。`nemotron-3-nano-omni` 大约一半的探测轮次能通过，另一半由一个完全没有视觉能力的模型应答——收录它等于换来一条「网关心情好才通」的图片通道，而它心情不好时，你拿到的是一段关于它从没看过的图片的、自信的错误答案。`qwen3.8-flash` 则是**付费模型被更便宜的付费模型顶替**，所以这不是免费层特有的毛病。已向上游反馈：BlockRunAI/blockrun#450。
+
+`gpt-5.6-luna-pro` 是往好的方向变的：它以前是收了钱之后返回 HTTP 500，网关已经修好了。
 
 第一次实测（2026-08-16）要糟得多：OpenAI 收了钱之后返回 HTTP 400，xAI 返回 503，Anthropic 把 `[Error: 400 {"message":"Could not process image"}]` 当作**助手文本**流回来——于是 harness 看到的是一次完全正常的成功轮次，智能体会把这串报错当成模型写的内容去执行。网关此后把这三种都修好了，本插件仍会识别这个确切形状（整条消息除了一个转发来的报错之外什么都没有），并把这次请求判为失败，状态码按它本该以 HTTP 形式到达时的方式映射。如果回答只是**提到**了某个错误，或者这一轮还调用了工具，则不会被改判。所以只有当网关给它打了 `vision` 标签**并且**它出现在 `visionModels` 里时，这个模型才会被声明支持图片输入，默认值就是实测集合。两个信号必须同时成立——只信标签会过度声称，只信列表则会在网关改标签之后继续声称。
 

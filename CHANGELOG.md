@@ -6,6 +6,11 @@ Entries say what changed for *you*, and what it meant when it was wrong — most
 
 ## Unreleased
 
+### Fixed
+- **Three models that can read images were refused, and one that cannot was nearly admitted.** `VERIFIED_VISION_MODELS` goes from 31 to 34, measured 2026-08-31 across 40 tagged models: `deepseek/deepseek-v4-flash-vision-exp`, `xiaomi/mimo-v2.5` and `openai/gpt-5.6-luna-pro` all answer correctly and are now offered image input. The first two are new to the catalog; `gpt-5.6-luna-pro` used to return HTTP 500 after taking payment and the gateway has fixed it. The three `gpt-*-pro` entries still cannot take an image, but they now fail `INVALID_REQUEST` instead of silently dropping it and billing for the answer — also an upstream fix.
+
+  Two stay out for a reason worth stating plainly, because it is not that they failed: **they were never reached.** `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` is answered by `nemotron-3-nano-30b`, which has no vision, on about half of all runs — it passes on the other half, which is exactly the trap. `qwen/qwen3.8-flash` is answered by `qwen/qwen3.7-flash`, a cheaper model that the catalog does not tag `vision` at all, so the substitution is not a free-tier quirk: it happens to paid models, between models of different price and different capability. Both reported as BlockRunAI/blockrun#450. Admitting either would buy an image path that works when the gateway's cascade feels like it, and produces a confident wrong answer about an unseen image when it does not.
+
 ### Added
 - **`npm run probe:vision`** — measures which `vision`-tagged models actually accept an image and prints the `VERIFIED_VISION_MODELS` array to paste back. The list had been measured by hand three times in a fortnight, each time because the roster moved underneath it, and the fourth refresh was going to be another set of ad-hoc curl commands. It also makes the measurement stricter than the hand runs were: three different colours per model instead of one, all of which must be right, because a single solid colour is guessable and a model that answers a plausible colour without receiving the image could have passed the old check. Free models cost nothing to probe; paid ones are ~$0.002 per call, and the estimate is printed before anything is sent.
 

@@ -202,14 +202,18 @@ DeepSeek serves no vision model, so this is capability rather than savings. Atta
     visionModels: [google/gemini-3.5-flash]   # narrows the measured default; widen as you verify
 ```
 
-**The gateway's `vision` tag is not sufficient, so this plugin does not trust it.** Every tagged chat model is sent the same inline PNG and asked its colour, and only the ones that answer correctly are offered image input. Measured 2026-08-30, 31 of 37 answered:
+**The gateway's `vision` tag is not sufficient, so this plugin does not trust it.** Every tagged chat model is sent a solid PNG and asked its colour, in three different colours — one is guessable — and only the models that answer all three correctly are offered image input. Re-measure it yourself with `npm run probe:vision`, which prints the list to paste back. Measured 2026-08-31, 34 of 40 answered:
 
 | Result | Models |
 |---|---|
-| answered correctly | every tagged Anthropic, Google, Moonshot, xAI and Z.ai model, and OpenAI's non-`pro` models plus `gpt-5.6-sol-pro` / `gpt-5.6-terra-pro` |
-| **image silently dropped, answer paid for** | `openai/gpt-5.2-pro`, `gpt-5.4-pro`, `gpt-5.5-pro` ("I didn't receive any image") |
-| **HTTP 500 after taking payment** | `openai/gpt-5.6-luna-pro` |
-| wrong answer or HTTP 429 | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, `nemotron-nano-12b-v2-vl` |
+| answered correctly | every tagged Anthropic, Google, Moonshot, xAI and Z.ai model; OpenAI's non-`pro` models plus `gpt-5.6-sol-pro`, `gpt-5.6-terra-pro` and now `gpt-5.6-luna-pro`; `deepseek/deepseek-v4-flash-vision-exp` and `xiaomi/mimo-v2.5` |
+| **refuses the image** — `INVALID_REQUEST` on all three | `openai/gpt-5.2-pro`, `gpt-5.4-pro`, `gpt-5.5-pro` |
+| answers that no image was sent | `nvidia/llama-3.2-11b-vision` |
+| **never measured — a different model answered** | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` (served by `nemotron-3-nano-30b`), `qwen/qwen3.8-flash` (served by `qwen3.7-flash`) |
+
+The last row is the one to understand before widening the list yourself. Those two are not failing; they are not being reached. `nemotron-3-nano-omni` passes on roughly half of probe runs and is answered by a model with no vision on the rest, so admitting it would buy an image path that works when the gateway's cascade feels like it — and when it does not, the reply is a confident wrong answer about an image that was never seen. `qwen3.8-flash` is a paid model substituted by a cheaper paid one, so this is not a free-tier quirk. Reported as BlockRunAI/blockrun#450.
+
+`gpt-5.6-luna-pro` moved the other way: it used to return HTTP 500 after taking payment, and the gateway fixed it.
 
 The first measurement (2026-08-16) was far worse: OpenAI returned HTTP 400 after payment, xAI 503, and Anthropic streamed `[Error: 400 {"message":"Could not process image"}]` as assistant text, so the harness saw an ordinary successful turn and the agent acted on the error string as though the model wrote it. The gateway has since fixed all three, and this plugin still detects that exact shape — the whole message being nothing but a relayed error — and finishes the request as a failure with the status mapped as if it had arrived as one. An answer that merely mentions an error, or a turn that also called a tool, is left alone. So a model is offered image input only when the gateway tags it `vision` **and** it appears in `visionModels`, which defaults to the measured set. Both signals must agree — the tag alone over-claims, and the list alone would keep claiming vision for a model the gateway has since retagged.
 

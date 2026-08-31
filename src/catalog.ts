@@ -87,24 +87,31 @@ const VISION_CATEGORY = 'vision'
 /**
  * Models measured to actually accept an image through this gateway.
  *
- * The `vision` tag is not sufficient. Every tagged chat model is sent the
- * same inline PNG and asked its colour; only the ones that answer correctly
- * are listed. Measured 2026-08-30: 31 of 37 answered.
+ * The `vision` tag is not sufficient. Every tagged chat model is sent a solid
+ * PNG and asked its colour; only the ones that answer correctly are listed.
+ * Measured with `npm run probe:vision` on 2026-08-31: 34 of 40 answered, in
+ * three different colours each — one colour is guessable, and the earlier
+ * hand runs used one.
  *
- * The six left out, and what each one costs to discover: `openai/gpt-5.2-pro`,
- * `gpt-5.4-pro` and `gpt-5.5-pro` drop the image and answer as if none was
- * sent, and `openai/gpt-5.6-luna-pro` returns HTTP 500 after taking payment —
- * all four billed. The other two are free, so they cost nothing but are worse
- * to trust: a wrong answer about an image reads exactly like a right one.
- * `nvidia/llama-3.2-11b-vision` — new that same day, replacing the retired
- * `nemotron-nano-12b-v2-vl` — reported "you didn't provide an image" on 3 of 3
- * attempts, and `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` answered
- * correctly on only 3 of 8. Its remaining five were not the model failing:
- * the gateway's free-tier fallback answered as `nvidia/nemotron-3-nano-30b`,
- * which has no vision at all. Since 0.10.4 the adapter reads the served id off
- * each chunk and `/spend` names it, so the substitution is at least visible —
- * but a substituted model is still the wrong one to have sent an image to,
- * which is why this entry stays out of the list (BlockRunAI/blockrun#450).
+ * The six left out fall into three kinds, and only the first is the model's
+ * own fault:
+ *
+ * - **Refuses or ignores the image.** `openai/gpt-5.2-pro`, `gpt-5.4-pro` and
+ *   `gpt-5.5-pro` now fail `INVALID_REQUEST` on all three colours; until
+ *   2026-08-30 they dropped the image and answered as if none was sent, which
+ *   was billed, so failing loudly is an upstream improvement.
+ *   `nvidia/llama-3.2-11b-vision` answers "you didn't provide an image".
+ * - **Never actually measured, because a different model answered.**
+ *   `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` and `qwen/qwen3.8-flash`
+ *   were served by `nvidia/nemotron-3-nano-30b` and `qwen/qwen3.7-flash`
+ *   respectively — neither of which is the model that was asked for, so
+ *   neither run says anything about the model under test. nano-omni does pass
+ *   when the gateway happens to reach it, which is the trap: an entry that
+ *   works when the cascade feels like it produces a confident wrong answer
+ *   about an image the model never received (BlockRunAI/blockrun#450).
+ *
+ * `openai/gpt-5.6-luna-pro` was excluded for returning HTTP 500 after taking
+ * payment and now passes; the gateway fixed it.
  *
  * Declaring image input from the tag would therefore admit an attachment that
  * fails mid-turn, after the message is durable, having already been paid for.
@@ -121,6 +128,7 @@ export const VERIFIED_VISION_MODELS: readonly string[] = [
   'anthropic/claude-sonnet-4.5',
   'anthropic/claude-sonnet-4.6',
   'anthropic/claude-sonnet-5',
+  'deepseek/deepseek-v4-flash-vision-exp',
   'google/gemini-2.5-flash',
   'google/gemini-2.5-pro',
   'google/gemini-3-flash-preview',
@@ -136,12 +144,14 @@ export const VERIFIED_VISION_MODELS: readonly string[] = [
   'openai/gpt-5.4-mini',
   'openai/gpt-5.5',
   'openai/gpt-5.6-luna',
+  'openai/gpt-5.6-luna-pro',
   'openai/gpt-5.6-sol',
   'openai/gpt-5.6-sol-pro',
   'openai/gpt-5.6-terra',
   'openai/gpt-5.6-terra-pro',
   'xai/grok-4.3',
   'xai/grok-4.5',
+  'xiaomi/mimo-v2.5',
   'zai/glm-5.3-flash',
 ]
 
