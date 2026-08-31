@@ -4,7 +4,7 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## Unreleased
+## 0.10.5 — 2026-08-31
 
 ### Fixed
 - **Three models that can read images were refused, and one that cannot was nearly admitted.** `VERIFIED_VISION_MODELS` goes from 31 to 34, measured 2026-08-31 across 40 tagged models: `deepseek/deepseek-v4-flash-vision-exp`, `xiaomi/mimo-v2.5` and `openai/gpt-5.6-luna-pro` all answer correctly and are now offered image input. The first two are new to the catalog; `gpt-5.6-luna-pro` used to return HTTP 500 after taking payment and the gateway has fixed it. The three `gpt-*-pro` entries still cannot take an image, but they now fail `INVALID_REQUEST` instead of silently dropping it and billing for the answer — also an upstream fix.
