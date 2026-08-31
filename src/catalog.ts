@@ -118,8 +118,13 @@ const VISION_CATEGORY = 'vision'
  *   works when the cascade feels like it produces a confident wrong answer
  *   about an image the model never received (BlockRunAI/blockrun#450).
  *
- * `openai/gpt-5.6-luna-pro` was excluded for returning HTTP 500 after taking
- * payment and now passes; the gateway fixed it.
+ * `openai/gpt-5.6-luna-pro` was excluded and now passes, but not because the
+ * image path improved: it was UNROUTABLE. The catalog still priced it at
+ * $0.10/$0.60 after OpenAI moved it to $0.20/$1.20, and the gateway derives
+ * its upstream cost ceiling from the catalog price — so every call matched no
+ * endpoint, and with no fallback declared, callers got a hard failure. The
+ * repricing fixed it. The image fix for the other three `pro` entries is a
+ * different change and is still open, which is why they still refuse.
  *
  * Declaring image input from the tag would therefore admit an attachment that
  * fails mid-turn, after the message is durable, having already been paid for.
