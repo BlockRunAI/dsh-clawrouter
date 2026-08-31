@@ -118,6 +118,23 @@ const VISION_CATEGORY = 'vision'
  *   works when the cascade feels like it produces a confident wrong answer
  *   about an image the model never received (BlockRunAI/blockrun#450).
  *
+ *   The nano-omni case is worth keeping in full, because three people measured
+ *   it independently and all three drew the wrong conclusion — TWO separate
+ *   gateway defects produce one symptom, and either alone explains the data
+ *   badly. nano-omni is routed through OpenRouter, so its images were always
+ *   forwarded and it answers correctly every time it is actually reached. The
+ *   runs where it reports no image are the ones where the free-tier cascade
+ *   substituted `nemotron-3-nano-30b` — which is routed direct to NVIDIA, is
+ *   not `vision`-tagged, and therefore had its image *correctly* removed by
+ *   the gateway's NVIDIA path. So the wrong answer comes from a model doing
+ *   the right thing with a request it should never have received.
+ *
+ *   Read either defect alone and you get a plausible, wrong story: "the model
+ *   is flaky at vision" (it is not) or "the gateway strips its images" (it
+ *   does not, for this one). That is why the fix for the NVIDIA image drop
+ *   (BlockRunAI/blockrun#456) does not put this entry in the list, and why a
+ *   probe run that happens to pass is not evidence it belongs there.
+ *
  * `openai/gpt-5.6-luna-pro` was excluded and now passes, but not because the
  * image path improved: it was UNROUTABLE. The catalog still priced it at
  * $0.10/$0.60 after OpenAI moved it to $0.20/$1.20, and the gateway derives
