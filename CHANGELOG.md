@@ -9,6 +9,10 @@ Entries say what changed for *you*, and what it meant when it was wrong — most
 ### Added
 - **`npm run probe:vision`** — measures which `vision`-tagged models actually accept an image and prints the `VERIFIED_VISION_MODELS` array to paste back. The list had been measured by hand three times in a fortnight, each time because the roster moved underneath it, and the fourth refresh was going to be another set of ad-hoc curl commands. It also makes the measurement stricter than the hand runs were: three different colours per model instead of one, all of which must be right, because a single solid colour is guessable and a model that answers a plausible colour without receiving the image could have passed the old check. Free models cost nothing to probe; paid ones are ~$0.002 per call, and the estimate is printed before anything is sent.
 
+  Its first real run found two faults in itself, which is the argument for the script rather than against it — both were failure modes the hand runs shared and nobody could see. It asked for 24 output tokens, enough for a one-word answer but not enough for a *reasoning* model to think first, so `deepseek/deepseek-v4-flash-vision-exp`, `qwen/qwen3.8-flash` and `xiaomi/mimo-v2.5` returned three empty answers each and read as vision failures. And it did not check which model answered: `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` passed 3 of 3 on a run where the gateway happened to reach it, having been substituted 6 of 6 an hour earlier. A probe whose failure mode is indistinguishable from the failure it looks for is worse than no probe.
+
+  Both are fixed. The cap is 256, the cost estimate is computed from catalog output prices rather than the $0.002 floor (a `$180/M` model is ~$0.046 a call at that cap, not $0.002), a right answer from a substituted model is not a pass, and `--models=a,b` re-runs a named few so a verdict that turned on timing can be re-checked without paying for the whole sweep.
+
   The three vision-tagged models added on 2026-08-31 remain unmeasured and therefore still excluded — see the known gap under 0.10.4. Run the probe against a funded wallet to close it.
 
 ## 0.10.4 — 2026-08-31

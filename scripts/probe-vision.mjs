@@ -28,6 +28,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from '../src/adapter.ts'
 import { BlockrunCatalog, VERIFIED_VISION_MODELS } from '../src/catalog.ts'
 import { DEFAULT_API_URL } from '../src/index.ts'
+import { SpendMeter } from '../src/spend.ts'
 
 const API_URL = DEFAULT_API_URL
 
@@ -45,6 +46,24 @@ const COLOURS = [
 ]
 
 const PROMPT = 'What colour is this image? Answer with one word.'
+
+/**
+ * Output cap per probe call.
+ *
+ * Not 24, which is all a one-word answer needs and which produced a false
+ * result on 2026-08-31: `deepseek/deepseek-v4-flash-vision-exp`,
+ * `qwen/qwen3.8-flash` and `xiaomi/mimo-v2.5` all returned an EMPTY answer
+ * three times each and were read as vision failures. All three are tagged
+ * `reasoning`, and a reasoning model spends its budget thinking before it
+ * emits a single character of content — so the cap, not the model, was what
+ * produced nothing. A probe whose failure mode is indistinguishable from the
+ * failure it is looking for is worse than no probe.
+ *
+ * The gateway settles on requested max_tokens, so this is not free: on a
+ * `$180/M` output model it is about $0.046 a call rather than the floor. The
+ * estimate printed below is computed from real catalog prices for that reason.
+ */
+const MAX_TOKENS = 256
 
 /** A solid-colour PNG, base64, built here so the probe carries no fixtures. */
 function png([r, g, b], size = 64) {
@@ -96,16 +115,43 @@ const entries = (body.data ?? []).filter(model =>
 
 const all = process.argv.includes('--all')
 const verified = new Set(VERIFIED_VISION_MODELS)
-const candidates = all ? entries : entries.filter(model => !verified.has(model.id))
+// `--models a,b` re-measures a named few. A verdict that turned on timing —
+// the gateway substituting on one run and not the next — is worth re-running
+// on its own rather than paying for the whole sweep again.
+const only = process.argv.find(argument => argument.startsWith('--models='))?.slice('--models='.length)
+const named = only === undefined ? undefined : new Set(only.split(',').map(id => id.trim()).filter(Boolean))
+const candidates = named !== undefined
+  ? entries.filter(model => named.has(model.id))
+  : all ? entries : entries.filter(model => !verified.has(model.id))
+
+if (named !== undefined) {
+  for (const id of named) {
+    if (!entries.some(model => model.id === id)) console.log(`note: ${id} is not a chat+vision entry in the catalog`)
+  }
+}
 
 if (candidates.length === 0) {
   console.log(`Every one of the ${entries.length} vision-tagged models is already measured. Pass --all to re-measure.`)
   process.exit(0)
 }
 
-const paid = candidates.filter(model => model.billing_mode !== 'free').length
-console.log(`${entries.length} vision-tagged models, ${candidates.length} to measure (${paid} paid).`)
-console.log(`~$${(paid * COLOURS.length * 0.002).toFixed(3)} at the $0.002 floor. Free models cost nothing.\n`)
+// Priced from the catalog rather than from the $0.002 floor, because the floor
+// stops being the answer as soon as the output cap is real: this quotes on the
+// max_tokens requested, so one call to a $180/M model is about $0.046, not
+// $0.002 — a 23x difference the old estimate hid.
+function quoteUsd(model) {
+  if (model.billing_mode === 'free') return 0
+  const output = typeof model.pricing?.output === 'number' ? model.pricing.output : 0
+  return Math.max(0.002, 0.001 + (MAX_TOKENS / 1_000_000) * output)
+}
+const paid = candidates.filter(model => model.billing_mode !== 'free')
+const estimate = paid.reduce((sum, model) => sum + quoteUsd(model) * COLOURS.length, 0)
+console.log(`${entries.length} vision-tagged models, ${candidates.length} to measure (${paid.length} paid).`)
+console.log(`~$${estimate.toFixed(3)} for ${paid.length * COLOURS.length} paid calls at ${MAX_TOKENS} max_tokens. Free models cost nothing.`)
+for (const model of [...paid].sort((left, right) => quoteUsd(right) - quoteUsd(left)).slice(0, 3)) {
+  if (quoteUsd(model) > 0.01) console.log(`    ${model.id} is ~$${quoteUsd(model).toFixed(3)} a call`)
+}
+console.log()
 
 // A key is needed only for the paid ones; the adapter asks for it per model,
 // so a run over free candidates alone works on a machine with no wallet.
@@ -115,7 +161,7 @@ if (key === undefined && paid > 0) {
 }
 
 /** One adapter per model, so `visionModels` can admit the candidate under test. */
-function adapterFor(model, base64) {
+function adapterFor(model, base64, meter) {
   return new BlockrunAdapter({
     provider: 'blockrun',
     connection: () => ({ apiUrl: API_URL, timeoutMs: 120_000 }),
@@ -126,17 +172,25 @@ function adapterFor(model, base64) {
     // does not yet admit, and the default would refuse the image locally.
     catalog: new BlockrunCatalog('blockrun', `${API_URL}/v1`, Date.now, [model]),
     resolveImage: () => Promise.resolve(`data:image/png;base64,${base64}`),
+    // Carried only to read back which model actually answered. The gateway
+    // substitutes silently, and a substitute that cannot see images answers a
+    // vision question as though none was asked — which looks exactly like the
+    // model failing. Without this, a run that happens to reach the real model
+    // reads as a pass and the list gets an entry that works intermittently.
+    meter,
   })
 }
 
 /** Ask one model about one colour. */
 async function ask(model, colour) {
   const text = []
+  const meter = new SpendMeter(0)
+  const servedBy = () => Object.keys(meter.summary().byModel[0]?.servedBy ?? {})
   try {
-    for await (const chunk of adapterFor(model, png(colour.rgb)).stream({
+    for await (const chunk of adapterFor(model, png(colour.rgb), meter).stream({
       provider: 'blockrun',
       model,
-      maxTokens: 24,
+      maxTokens: MAX_TOKENS,
       messages: [createUserMessage({
         content: [
           { type: 'text', text: PROMPT },
@@ -156,16 +210,20 @@ async function ask(model, colour) {
     })) {
       if (chunk.type === 'text-delta') text.push(chunk.text)
       if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
-        return { ok: false, note: chunk.reason.failure.code }
+        return { ok: false, note: chunk.reason.failure.code, served: servedBy() }
       }
     }
   } catch (error) {
-    return { ok: false, note: error?.code ?? String(error?.message ?? error).slice(0, 60) }
+    return { ok: false, note: error?.code ?? String(error?.message ?? error).slice(0, 60), served: servedBy() }
   }
   const answer = text.join('').trim()
+  const served = servedBy()
   return {
-    ok: colour.accept.test(answer),
+    // A right answer from a model that was not the one asked for says nothing
+    // about the model being measured, so it is not a pass.
+    ok: colour.accept.test(answer) && served.length === 0,
     note: answer.length === 0 ? '(empty answer)' : answer.slice(0, 48).replace(/\s+/g, ' '),
+    served,
   }
 }
 
@@ -177,9 +235,13 @@ for (const model of candidates) {
   const verdict = wins === COLOURS.length ? 'PASS' : 'FAIL'
   if (verdict === 'PASS') passed.push(model.id)
   const tier = model.billing_mode === 'free' ? ' [free]' : ''
+  const substitutes = [...new Set(results.flatMap(result => result.served ?? []))]
   console.log(`${verdict}  ${model.id}${tier}  ${wins}/${COLOURS.length}`)
   for (const result of results) {
     if (!result.ok) console.log(`        ${result.colour.name} -> ${result.note}`)
+  }
+  if (substitutes.length > 0) {
+    console.log(`        NOT MEASURED: the gateway answered as ${substitutes.join(', ')} — this says nothing about ${model.id}`)
   }
 }
 
