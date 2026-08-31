@@ -46,6 +46,7 @@
     "build": "tsup",
     "prepare": "tsup",
     "sync:models": "tsx scripts/sync-model-count.mjs",
+    "probe:vision": "tsx scripts/probe-vision.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:docker": "docker build -q -t dsh-clawrouter-smoke test/docker && docker run --rm dsh-clawrouter-smoke",

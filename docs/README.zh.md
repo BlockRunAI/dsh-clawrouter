@@ -308,7 +308,8 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 ```sh
 npm test          # 398 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
-npm run sync:models  # 从实时 catalog 刷新两份 README 里的模型数量
+npm run sync:models  # 从实时 catalog 刷新两份 README 里的模型数量和免费模型数
+npm run probe:vision # 实测哪些带 vision 标签的模型真的能接受图片；直接打印可粘贴的名单
 npm run test:docker  # 在干净容器里安装**已发布**的包，验证它能组装起来
 ```
 

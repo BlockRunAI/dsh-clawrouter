@@ -4,6 +4,13 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## Unreleased
+
+### Added
+- **`npm run probe:vision`** — measures which `vision`-tagged models actually accept an image and prints the `VERIFIED_VISION_MODELS` array to paste back. The list had been measured by hand three times in a fortnight, each time because the roster moved underneath it, and the fourth refresh was going to be another set of ad-hoc curl commands. It also makes the measurement stricter than the hand runs were: three different colours per model instead of one, all of which must be right, because a single solid colour is guessable and a model that answers a plausible colour without receiving the image could have passed the old check. Free models cost nothing to probe; paid ones are ~$0.002 per call, and the estimate is printed before anything is sent.
+
+  The three vision-tagged models added on 2026-08-31 remain unmeasured and therefore still excluded — see the known gap under 0.10.4. Run the probe against a funded wallet to close it.
+
 ## 0.10.4 — 2026-08-31
 
 ### Fixed

@@ -314,7 +314,8 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ```sh
 npm test          # 398 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
-npm run sync:models  # refresh the model count in both READMEs from the live catalog
+npm run sync:models  # refresh the model and free-tier counts in both READMEs from the live catalog
+npm run probe:vision # measure which vision-tagged models really accept an image; prints the list to paste
 npm run test:docker  # install the PUBLISHED package in a clean container and assert it composes
 ```
 
