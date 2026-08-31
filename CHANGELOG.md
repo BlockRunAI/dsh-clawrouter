@@ -4,7 +4,7 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## Unreleased
+## 0.10.4 — 2026-08-31
 
 ### Fixed
 - **The model count said 70; the gateway now serves 73.** `deepseek/deepseek-v4-flash-vision-exp`, `qwen/qwen3.8-flash` and `xiaomi/mimo-v2.5` were added within hours of 0.10.3 — the deployment caught up with the roster BlockRunAI/blockrun#448 had already landed. Regenerated with `npm run sync:models`; the free count is unchanged at 7.
