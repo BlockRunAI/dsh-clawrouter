@@ -201,3 +201,64 @@ describe('free-tier calls settle nothing, so they cost nothing', () => {
     expect(renderSpend(meter.summary())).toMatch(/FLOOR AND LIKELY WELL UNDER/)
   })
 })
+
+describe('a substituted model is named, not hidden', () => {
+  // The gateway answers some requests with a different model than the one
+  // asked for — the free-tier cascade picking a live rung, the free-model
+  // health gate rerouting around a dead one, and MODEL_REDIRECTS rewriting a
+  // retired id. Measured 2026-08-30: six consecutive streamed requests for
+  // nvidia/nemotron-3-nano-omni-30b-a3b-reasoning were answered by
+  // nvidia/nemotron-3-nano-30b, which carries no vision tag at all.
+  const ASKED = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning'
+  const SERVED = 'nvidia/nemotron-3-nano-30b'
+
+  it('counts the call against the model that was requested', () => {
+    // Not against the one that answered. A row that renamed itself would look
+    // like a model nobody selected appearing out of nowhere, and the reader
+    // would have no way back to the id they actually pinned.
+    const meter = new SpendMeter(PRICE)
+    meter.record(ASKED, usage(10, 5), true, SERVED)
+    const [entry] = meter.summary().byModel
+    expect(entry?.model).toBe(ASKED)
+    expect(entry?.calls).toBe(1)
+  })
+
+  it('records which model answered, and how often', () => {
+    const meter = new SpendMeter(PRICE)
+    for (let i = 0; i < 6; i++) meter.record(ASKED, usage(10, 5), true, SERVED)
+    expect(meter.summary().byModel[0]?.servedBy).toEqual({ [SERVED]: 6 })
+  })
+
+  it('says nothing when the model that answered is the one that was asked', () => {
+    // The adapter passes the served id through unconditionally, so the "no
+    // substitution" case has to be silent here rather than at the call site.
+    const meter = new SpendMeter(PRICE)
+    meter.record(ASKED, usage(10, 5), true, ASKED)
+    expect(meter.summary().byModel[0]?.servedBy).toBeUndefined()
+  })
+
+  it('keeps substitutions apart when more than one model stood in', () => {
+    const meter = new SpendMeter(PRICE)
+    meter.record(ASKED, usage(10, 5), true, SERVED)
+    meter.record(ASKED, usage(10, 5), true, 'nvidia/nemotron-3.5-lightning')
+    meter.record(ASKED, usage(10, 5), true, SERVED)
+    expect(meter.summary().byModel[0]?.servedBy)
+      .toEqual({ [SERVED]: 2, 'nvidia/nemotron-3.5-lightning': 1 })
+  })
+
+  it('prints the substitution under the row it belongs to', () => {
+    const meter = new SpendMeter(PRICE)
+    for (let i = 0; i < 6; i++) meter.record(ASKED, usage(10, 5), true, SERVED)
+    const text = renderSpend(meter.summary())
+    expect(text).toMatch(new RegExp(`answered by ${SERVED} on 6 of 6`))
+    expect(text).toMatch(/gateway substituted a different model/)
+    // The row itself still leads with the id the reader chose.
+    expect(text).toMatch(new RegExp(`  ${ASKED}  \\$0  6 calls`))
+  })
+
+  it('leaves an ordinary row alone', () => {
+    const meter = new SpendMeter(PRICE)
+    meter.record('deepseek/deepseek-chat', usage(17, 3))
+    expect(renderSpend(meter.summary())).not.toMatch(/answered by/)
+  })
+})

@@ -214,3 +214,67 @@ describe('the free tier does not ask for a wallet', () => {
     expect(bodies[0]?.['model']).toBe('nvidia/nemotron-3.5-lightning')
   })
 })
+
+describe('the model that answered is read off the wire', () => {
+  // The gateway substitutes silently and the headers it sets for two of the
+  // three cases do not reach us through the SDK, so the per-chunk `model`
+  // field is the only signal there is. On this streaming path that field is
+  // always a canonical BlockRun id for every provider — the vendor-versioned
+  // ids and the composite "asked (fallback: served)" string belong to the
+  // non-streaming endpoint, which this route never calls — so a mismatch is a
+  // real substitution rather than a naming difference.
+
+  /** Answer every chat request as `served`, whatever was asked for. */
+  function substitute(served: string): void {
+    server?.removeAllListeners('request')
+    server?.on('request', (req, res) => {
+      if (req.url?.endsWith('/models') === true) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(CATALOG))
+        return
+      }
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.write(`data: ${JSON.stringify({ model: served, choices: [{ delta: { content: 'ok' } }] })}\n\n`)
+        res.write(`data: ${JSON.stringify({ model: served, choices: [{ finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } })}\n\n`)
+        res.write('data: [DONE]\n\n')
+        res.end()
+      })
+    })
+  }
+
+  it('records the substitute against the model that was requested', async () => {
+    substitute('deepseek/deepseek-chat')
+    const meter = new SpendMeter(0.002)
+    await run(adapter(undefined, meter))
+    const [entry] = meter.summary().byModel
+    expect(entry?.model).toBe('anthropic/claude-opus-5')
+    expect(entry?.servedBy).toEqual({ 'deepseek/deepseek-chat': 1 })
+  })
+
+  it('says nothing when the gateway serves what was asked for', async () => {
+    substitute('anthropic/claude-opus-5')
+    const meter = new SpendMeter(0.002)
+    await run(adapter(undefined, meter))
+    expect(meter.summary().byModel[0]?.servedBy).toBeUndefined()
+  })
+
+  it('is silent for a gateway that omits the field entirely', async () => {
+    // The default server in this file sends no `model` at all, which is what
+    // another OpenAI-compatible gateway behind a configured apiUrl may do.
+    // Absence must not read as a substitution.
+    const meter = new SpendMeter(0.002)
+    await run(adapter(undefined, meter))
+    expect(meter.summary().byModel[0]?.servedBy).toBeUndefined()
+  })
+
+  it('still delivers the answer the substitute produced', async () => {
+    // Reporting the swap must not turn it into a failure: the reply is real
+    // and the caller paid for it.
+    substitute('deepseek/deepseek-chat')
+    const chunks = await run(adapter())
+    expect(chunks.filter(c => c.type === 'text-delta').map(c => c.text).join('')).toBe('ok')
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+  })
+})

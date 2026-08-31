@@ -59,12 +59,25 @@ export interface ModelSpend {
    * exactly the doubt that makes a total worth nothing.
    */
   free?: boolean
+  /**
+   * Calls the gateway answered with a DIFFERENT model, counted by that
+   * model's id. Absent when every call was served by the model requested.
+   *
+   * Recorded against the model that was asked for, not the one that answered,
+   * because that is the id the reader chose and would recognize. The
+   * substitution is then named beside it rather than replacing it, which is
+   * the only form in which it is actually useful: a row that silently renamed
+   * itself would look like a model nobody selected appearing from nowhere.
+   */
+  servedBy?: Record<string, number>
 }
 
 /** A model's running totals, plus the paid-call count `costUsd` is computed from. */
 interface Tally extends ModelSpend {
   /** Calls that actually settled on chain; free-tier calls are excluded. */
   paidCalls: number
+  /** Substitutions by served model id, accumulated in place. */
+  substitutions: Map<string, number>
 }
 
 /** Input size past which the per-request floor stops resembling the real charge. */
@@ -100,15 +113,23 @@ export class SpendMeter {
    * chat models as free on 2026-08-30, so a session spent trying them out
    * would report a cost that is entirely fictional.
    *
-   * @param model - the model that served it.
+   * @param model - the model that was requested.
    * @param usage - reported token counts, carried for context only.
    * @param free - whether the gateway served this call without payment.
+   * @param servedModel - the model that actually answered, when the gateway
+   *   substituted a different one. Counted, never charged separately: this
+   *   meter prices a call at a flat per-request figure, so which row it lands
+   *   on does not move the total, and the requested id is the one the reader
+   *   picked.
    */
-  record(model: string, usage: TokenUsage, free = false): void {
+  record(model: string, usage: TokenUsage, free = false, servedModel?: string): void {
     const entry = this.#models.get(model)
-      ?? { model, calls: 0, paidCalls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }
+      ?? { model, calls: 0, paidCalls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, substitutions: new Map() }
     entry.calls += 1
     if (!free) entry.paidCalls += 1
+    if (servedModel !== undefined && servedModel !== model) {
+      entry.substitutions.set(servedModel, (entry.substitutions.get(servedModel) ?? 0) + 1)
+    }
     entry.inputTokens += usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
     entry.outputTokens += usage.outputTokens
     entry.costUsd = entry.paidCalls * this.requestPriceUsd
@@ -122,7 +143,7 @@ export class SpendMeter {
   summary(): SpendSummary {
     const byModel = [...this.#models.values()]
       .sort((left, right) => right.calls - left.calls)
-      .map(({ model, calls, inputTokens, outputTokens, costUsd, paidCalls }) => ({
+      .map(({ model, calls, inputTokens, outputTokens, costUsd, paidCalls, substitutions }) => ({
         model,
         calls,
         inputTokens,
@@ -132,6 +153,7 @@ export class SpendMeter {
         // model repriced mid-process keeps its real cost and loses the label,
         // rather than showing a partial total under a "free" heading.
         ...paidCalls === 0 ? { free: true } : {},
+        ...substitutions.size === 0 ? {} : { servedBy: Object.fromEntries(substitutions) },
       }))
     return {
       calls: byModel.reduce((sum, entry) => sum + entry.calls, 0),
@@ -168,6 +190,12 @@ export function renderSpend(summary: SpendSummary): string {
       `  ${entry.model}  ${usd(entry.costUsd)}  ${entry.calls} call${entry.calls === 1 ? '' : 's'}`
       + (entry.free === true ? '  (free tier — no payment was signed)' : ''),
     )
+    // Printed under the row rather than folded into it, because it is not a
+    // detail of the cost — it says the answer came from somewhere else, which
+    // is a fact about the reply rather than about the bill.
+    for (const [served, count] of Object.entries(entry.servedBy ?? {})) {
+      lines.push(`      answered by ${served} on ${count} of ${entry.calls} — the gateway substituted a different model`)
+    }
   }
   // Everything below describes how a quote is formed, and a free call has no
   // quote. Read across all calls, a session that mostly used the free tier

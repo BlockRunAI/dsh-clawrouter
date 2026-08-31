@@ -4,6 +4,19 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## Unreleased
+
+### Fixed
+- **The model count said 70; the gateway now serves 73.** `deepseek/deepseek-v4-flash-vision-exp`, `qwen/qwen3.8-flash` and `xiaomi/mimo-v2.5` were added within hours of 0.10.3 — the deployment caught up with the roster BlockRunAI/blockrun#448 had already landed. Regenerated with `npm run sync:models`; the free count is unchanged at 7.
+
+### Added
+- **`/spend` now says when a different model answered.** The gateway substitutes silently behind the free tier, and it is not the corner case it looked like: every request for `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` was answered by something else, one request in three for `nvidia/nemotron-3-ultra-550b` — the largest free model listed, 550B at 1M context — came back from a 30B at 131K, and one substitute (`nvidia/nemotron-3-super-120b`) does not appear in the public catalog at all, so it could not have been selected or checked. Each chunk names the model that served it, so this route now reads that field and prints the substitute under the row for the id you asked for. The call still counts against the model you requested: this meter prices every call at the same flat figure, so which row it lands on cannot move the total, and the requested id is the one you would recognize. It is a report, not a guard — the reply is real and it is delivered. Reported upstream as BlockRunAI/blockrun#450, with the roster change added to #443.
+
+  Only the streaming endpoint makes this possible, which is the endpoint this route uses: there the `model` field is the canonical BlockRun id for every provider, so a mismatch is a real substitution. The non-streaming endpoint returns vendor-versioned ids on some paths and a composite `"asked (fallback: served)"` string on others, and the same check there would be noise.
+
+### Known gap
+- **Three newly-added vision models are not yet in the `visionModels` default**, so an image sent to `deepseek/deepseek-v4-flash-vision-exp`, `qwen/qwen3.8-flash` or `xiaomi/mimo-v2.5` is still refused as unsupported. All three carry the `vision` tag — the tagged count went 37 to 40 — but the default list only ever contains models measured to accept a real image through this gateway, and these three arrived after the last measurement run. They are paid, so measuring them costs a few cents against a funded wallet; until that runs, set `visionModels` explicitly if you want to use one. Listing them on the tag alone is the mistake that made 0.10.2 necessary: several tagged models charge and then fail.
+
 ## 0.10.3 — 2026-08-30
 
 ### Fixed

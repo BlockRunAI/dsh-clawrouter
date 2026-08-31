@@ -100,10 +100,11 @@ const VISION_CATEGORY = 'vision'
  * `nemotron-nano-12b-v2-vl` — reported "you didn't provide an image" on 3 of 3
  * attempts, and `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` answered
  * correctly on only 3 of 8. Its remaining five were not the model failing:
- * the gateway's free-tier fallback served `nvidia/nemotron-3-nano-30b`, which
- * has no vision at all. The response says so in its `model` field — it is this
- * adapter that does not read it, so the substitution is invisible to everything
- * downstream (BlockRunAI/blockrun#450).
+ * the gateway's free-tier fallback answered as `nvidia/nemotron-3-nano-30b`,
+ * which has no vision at all. Since 0.10.4 the adapter reads the served id off
+ * each chunk and `/spend` names it, so the substitution is at least visible —
+ * but a substituted model is still the wrong one to have sent an image to,
+ * which is why this entry stays out of the list (BlockRunAI/blockrun#450).
  *
  * Declaring image input from the tag would therefore admit an attachment that
  * fails mid-turn, after the message is durable, having already been paid for.

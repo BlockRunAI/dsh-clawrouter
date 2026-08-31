@@ -210,6 +210,12 @@ export class BlockrunAdapter extends LlmAdapter {
 
     const translator = new StreamTranslator()
     const iterator = client.stream<BlockrunStreamChunk>(CHAT_PATH, body)[Symbol.asyncIterator]()
+    // The model that actually answered, when it is not the one that was asked
+    // for. The gateway substitutes silently in three places and the headers it
+    // sets for two of them do not reach us through the SDK, so the per-chunk
+    // `model` field is the only signal available. First mismatch wins: it
+    // identifies the substitution, and a later chunk cannot un-substitute it.
+    let servedModel: string | undefined
     try {
       for (;;) {
         throwIfAborted(options.signal)
@@ -227,12 +233,17 @@ export class BlockrunAdapter extends LlmAdapter {
         // Checked again after the await: a turn cancelled while this read was
         // outstanding must not emit the chunk it was waiting on.
         throwIfAborted(options.signal)
-        yield * this.#metered(model, free, translator.accept(next.value))
+        const served = next.value.model
+        if (servedModel === undefined && typeof served === 'string' && served.length > 0 && served !== model) {
+          servedModel = served
+        }
+        yield * this.#metered(model, free, servedModel, translator.accept(next.value))
       }
       // The terminal flush is metered too, and it is the one that counts: the
       // translator BUFFERS usage and emits it from `end()`, so watching only
-      // the per-chunk output recorded nothing at all.
-      yield * this.#metered(model, free, translator.end())
+      // the per-chunk output recorded nothing at all. It is also the flush that
+      // sees the final `servedModel`, since usage arrives last.
+      yield * this.#metered(model, free, servedModel, translator.end())
     } finally {
       // Terminating the generator releases the SDK's reader. The in-flight
       // HTTP request is not itself cancellable until `BlockrunClient.stream`
@@ -250,16 +261,22 @@ export class BlockrunAdapter extends LlmAdapter {
    *
    * Counted from the provider's own report, so a call that never sent one is
    * never guessed at — it simply does not appear in the total.
-   * @param model - the model that served the call.
+   * @param model - the model the request asked for.
    * @param free - whether the gateway served it without payment.
+   * @param servedModel - the model that answered, when it was a different one.
    * @param chunks - chunks about to be yielded.
    * @returns the same chunks, unchanged.
    */
-  #metered(model: string, free: boolean, chunks: readonly StreamChunk[]): readonly StreamChunk[] {
+  #metered(
+    model: string,
+    free: boolean,
+    servedModel: string | undefined,
+    chunks: readonly StreamChunk[],
+  ): readonly StreamChunk[] {
     const meter = this.#options.meter
     if (meter !== undefined) {
       for (const chunk of chunks) {
-        if (chunk.type === 'usage') meter.record(model, chunk.usage, free)
+        if (chunk.type === 'usage') meter.record(model, chunk.usage, free, servedModel)
       }
     }
     return chunks

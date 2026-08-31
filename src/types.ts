@@ -44,6 +44,24 @@ export interface BlockrunToolCallDelta {
 
 /** OpenAI-compatible streaming delta, the wire form BlockRun emits. */
 export interface BlockrunStreamChunk {
+  /**
+   * The model that actually served this chunk.
+   *
+   * Worth reading rather than assuming, because it is not always the model
+   * that was asked for. The gateway substitutes in three places — the
+   * free-tier cascade picks a live rung, the free-model health gate reroutes
+   * around a dead one, and `MODEL_REDIRECTS` rewrites a retired id before
+   * dispatch — and only the first two set a response header, which the SDK
+   * does not surface anyway.
+   *
+   * On this streaming path the value is always a canonical BlockRun catalog
+   * id, for every provider, so a mismatch means a real substitution rather
+   * than a naming difference. (The non-streaming endpoint is not so tidy: it
+   * returns vendor-versioned ids for OpenAI- and Anthropic-direct, and a
+   * composite `"asked (fallback: served)"` string that is not an id at all.
+   * This route never reads it.)
+   */
+  model?: string
   choices?: {
     index?: number
     delta?: {
