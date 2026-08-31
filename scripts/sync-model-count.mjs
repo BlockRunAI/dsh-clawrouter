@@ -30,6 +30,7 @@ const count = models.length
 const free = projectFreeModels(body)
 const freeCount = models.filter(model => free.has(model.id)).length
 
+/** @param {string} name */
 const marker = name => new RegExp(`(<!-- br:models\\.${name} -->)\\d+(<!-- \\/br:models\\.${name} -->)`, 'g')
 const COUNTS = [
   // A zero free tier is a real state, not a bug to refuse: four of the five

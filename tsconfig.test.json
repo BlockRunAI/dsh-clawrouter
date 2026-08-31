@@ -10,7 +10,14 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": ".",
-    "declaration": false
+    "declaration": false,
+    // The scripts were already in `include` but were being skipped silently:
+    // without `allowJs`, TypeScript ignores `.mjs` rather than reporting it.
+    // `checkJs` is what makes their presence mean something — `paid > 0`
+    // against an array shipped in probe-vision.mjs and disabled a warning
+    // nobody saw missing, which this would have caught at the keystroke.
+    "allowJs": true,
+    "checkJs": true
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.mjs"]
 }
