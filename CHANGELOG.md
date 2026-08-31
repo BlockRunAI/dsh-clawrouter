@@ -4,7 +4,7 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## Unreleased
+## 0.10.6 — 2026-08-31
 
 ### Added
 - **The vision probe now has tests, and enabling them found a third bug in it.** `probe:vision` decides what goes into `VERIFIED_VISION_MODELS`, and that list decides whether the harness will let an image be sent at all — so it is a measuring instrument whose output is pasted into source, and it had already been wrong twice in an afternoon. Both times the bug looked exactly like the failure it was written to detect, which is why reading its output could not catch either. Its judgement is now separated from its requests and tested offline: that the PNG it sends really is the colour it claims (a malformed encoder would fail every model and read as a gateway-wide outage), that the three colour patterns reject each other so a blind guess cannot pass, that a correct answer from a substituted model is not a pass, that a short run cannot promote a model, and that the cost estimate follows catalog prices rather than the floor.
@@ -12,6 +12,7 @@ Entries say what changed for *you*, and what it meant when it was wrong — most
 
 ### Changed
 - **`nvidia/llama-3.2-11b-vision` was written up as a model that cannot see; it is a gateway that never sends the image.** The gateway strips every `image_url` part on both its NVIDIA paths before dispatch — unconditionally, for every NVIDIA model, under a comment asserting that NVIDIA models have no vision. Probed directly against NVIDIA, that model and `nemotron-3-nano-omni` both name the colour correctly, so the comment is false and the entry's fluent "you didn't provide an image" is simply accurate. It stays out of `visionModels`, because this list is what works *through* this gateway and nothing here has changed for a caller — but the fault was mis-attributed to the vendor, and the streaming path drops the image with no log line at all, which is why it took a source read to see. Found with BlockRunAI/blockrun's own maintainers; fix is theirs.
+- **Opened BlockRunAI/blockrun#456** to fix the drop itself, since the report alone would have left it standing: one shared module for both NVIDIA legs, image parts forwarded when the catalog tags the model `vision`, still dropped for a text-only one, and now logged on both legs rather than silently on the streaming one. When it deploys, `npm run probe:vision -- --models=nvidia/llama-3.2-11b-vision,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` re-measures both for free and they should join the default.
 - **Filed BlockRunAI/blockrun#453** for the relayed-error-as-assistant-text shape noted under 0.10.5: a `200` whose `choices[0].message.content` is a stringified upstream error, structurally identical to a real answer. `src/translate.ts` already refuses it here; the issue asks for it at the gateway, since a client that has not implemented the check has no way to know.
 
 ## 0.10.5 — 2026-08-31
