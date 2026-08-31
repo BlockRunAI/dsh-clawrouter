@@ -120,3 +120,84 @@ describe('the floor stops being honest as context grows', () => {
     expect(renderSpend(meter.summary())).not.toMatch(/FLOOR AND LIKELY WELL UNDER/)
   })
 })
+
+describe('free-tier calls settle nothing, so they cost nothing', () => {
+  // Measured 2026-08-30: the gateway answers a `billing_mode: "free"` model
+  // with HTTP 200 and never opens an x402 handshake, so no quote is signed and
+  // no USDC moves. Charging the flat request price for one invents a total out
+  // of a wallet that was never touched — and the route now lists seven free
+  // models, so this is not a corner case but the whole "try it before you fund
+  // anything" path.
+  const FREE = 'nvidia/nemotron-3.5-lightning'
+
+  it('prices a free call at zero while still counting it', () => {
+    const meter = new SpendMeter(PRICE)
+    for (let i = 0; i < 5; i++) meter.record(FREE, usage(20, 40), true)
+    const summary = meter.summary()
+    expect(summary.totalUsd).toBe(0)
+    expect(summary.calls).toBe(5)
+    // The tokens are still carried: a free model's context still fills up, and
+    // the reason to show a count is not that it became money.
+    expect(summary.outputTokens).toBe(200)
+  })
+
+  it('charges only the paid calls when a session mixes both', () => {
+    const meter = new SpendMeter(PRICE)
+    meter.record(FREE, usage(20, 40), true)
+    meter.record(FREE, usage(20, 40), true)
+    meter.record('deepseek/deepseek-chat', usage(17, 3))
+    const summary = meter.summary()
+    expect(summary.calls).toBe(3)
+    expect(summary.totalUsd).toBeCloseTo(PRICE, 10)
+    expect(summary.byModel.find(entry => entry.model === FREE)?.costUsd).toBe(0)
+    expect(summary.byModel.find(entry => entry.model === FREE)?.free).toBe(true)
+    expect(summary.byModel.find(entry => entry.model === 'deepseek/deepseek-chat')?.free).toBeUndefined()
+  })
+
+  it('defaults to charging, so an uninstrumented caller cannot under-report', () => {
+    const meter = new SpendMeter(PRICE)
+    meter.record(FREE, usage(20, 40))
+    expect(meter.summary().totalUsd).toBeCloseTo(PRICE, 10)
+  })
+
+  it('drops the free label once the same model is charged for', () => {
+    // A model repriced mid-process keeps its real cost rather than showing a
+    // partial total under a heading that says it was free.
+    const meter = new SpendMeter(PRICE)
+    meter.record(FREE, usage(20, 40), true)
+    meter.record(FREE, usage(20, 40))
+    const [entry] = meter.summary().byModel
+    expect(entry?.free).toBeUndefined()
+    expect(entry?.costUsd).toBeCloseTo(PRICE, 10)
+  })
+
+  it('says a $0 row is really free rather than leaving it to be read as a bug', () => {
+    const meter = new SpendMeter(PRICE)
+    meter.record(FREE, usage(20, 40), true)
+    const text = renderSpend(meter.summary())
+    expect(text).toMatch(/no payment was signed/)
+    expect(text).toMatch(/nothing was quoted and nothing settled/)
+    // The quote explanation describes a handshake that never happened here.
+    expect(text).not.toMatch(/Quoted from the request/)
+  })
+
+  it('does not warn about a climbing quote for calls that were never quoted', () => {
+    // The large-context warning is about how a 402 quote grows with input. A
+    // free call has no quote, so firing it would tell a reader who owes
+    // nothing that their total is "well under the real charge".
+    const meter = new SpendMeter(PRICE)
+    meter.record(FREE, usage(112_000, 200), true)
+    const text = renderSpend(meter.summary())
+    expect(text).not.toMatch(/FLOOR AND LIKELY WELL UNDER/)
+    expect(text).toMatch(/\$0\b/)
+  })
+
+  it('still warns when the paid half of a session carries a large context', () => {
+    const meter = new SpendMeter(PRICE)
+    for (let i = 0; i < 50; i++) meter.record(FREE, usage(20, 10), true)
+    meter.record('anthropic/claude-opus-5', usage(112_000, 200))
+    // Averaged over the paid calls alone. Diluting it with fifty free ones
+    // would silence a warning about a call that really did quote ~$1.08.
+    expect(renderSpend(meter.summary())).toMatch(/FLOOR AND LIKELY WELL UNDER/)
+  })
+})

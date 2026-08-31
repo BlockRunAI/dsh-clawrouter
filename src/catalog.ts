@@ -89,11 +89,21 @@ const VISION_CATEGORY = 'vision'
  *
  * The `vision` tag is not sufficient. Every tagged chat model is sent the
  * same inline PNG and asked its colour; only the ones that answer correctly
- * are listed. Measured 2026-08-30: 31 of 37 answered. The six left out fail
- * in ways the caller pays for: `openai/gpt-5.2-pro`, `gpt-5.4-pro` and
- * `gpt-5.5-pro` drop the image and answer as if none was sent,
- * `openai/gpt-5.6-luna-pro` returns HTTP 500 after taking payment, and the
- * two NVIDIA Nemotron entries either answer wrongly or rate-limit.
+ * are listed. Measured 2026-08-30: 31 of 37 answered.
+ *
+ * The six left out, and what each one costs to discover: `openai/gpt-5.2-pro`,
+ * `gpt-5.4-pro` and `gpt-5.5-pro` drop the image and answer as if none was
+ * sent, and `openai/gpt-5.6-luna-pro` returns HTTP 500 after taking payment —
+ * all four billed. The other two are free, so they cost nothing but are worse
+ * to trust: a wrong answer about an image reads exactly like a right one.
+ * `nvidia/llama-3.2-11b-vision` — new that same day, replacing the retired
+ * `nemotron-nano-12b-v2-vl` — reported "you didn't provide an image" on 3 of 3
+ * attempts, and `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` answered
+ * correctly on only 3 of 8. Its remaining five were not the model failing:
+ * the gateway's free-tier fallback served `nvidia/nemotron-3-nano-30b`, which
+ * has no vision at all. The response says so in its `model` field — it is this
+ * adapter that does not read it, so the substitution is invisible to everything
+ * downstream (BlockRunAI/blockrun#450).
  *
  * Declaring image input from the tag would therefore admit an attachment that
  * fails mid-turn, after the message is durable, having already been paid for.
@@ -137,10 +147,23 @@ export const VERIFIED_VISION_MODELS: readonly string[] = [
 /** The capability tag marking an entry this route can actually converse with. */
 const CHAT_CATEGORY = 'chat'
 
+/**
+ * The `billing_mode` marking an entry the gateway serves without payment.
+ *
+ * Read from this field alone, never inferred from a `0` price. An entry whose
+ * pricing the catalog simply omits, or states as zero by mistake, must fall
+ * through to the paid path — that path only asks for a wallet key the
+ * deployment already configured, whereas guessing "free" wrongly sends a
+ * request with no means to pay and reports its cost as nothing.
+ */
+const FREE_BILLING_MODE = 'free'
+
 interface CacheEntry {
   models: readonly LlmResolvedModelInfo[]
   /** Published per-million rates by model id; absent for a model the catalog does not price. */
   rates: ReadonlyMap<string, ModelRates>
+  /** Ids the catalog bills as `free`; these settle nothing and need no wallet. */
+  freeModels: ReadonlySet<string>
   fetchedAt: number
 }
 
@@ -165,6 +188,33 @@ export class BlockrunCatalog {
   /** Published rates from the last successful read, by model id. */
   get rates(): ReadonlyMap<string, ModelRates> {
     return this.#cache?.rates ?? new Map()
+  }
+
+  /** Ids the last successful read billed as `free`. */
+  get freeModels(): ReadonlySet<string> {
+    return this.#cache?.freeModels ?? new Set()
+  }
+
+  /**
+   * Whether the gateway serves this model without payment.
+   *
+   * Answers `false` when the catalog cannot be read, rather than propagating
+   * the failure: every caller uses this to decide whether a wallet is needed
+   * and what a call cost, and both questions have a safe answer already —
+   * require the configured key, and price the call. A catalog blip must not
+   * turn into a refused request or an under-reported bill.
+   *
+   * @param model - BlockRun model id.
+   * @param signal - cancels the underlying catalog read.
+   * @returns true only when the catalog states `billing_mode: "free"`.
+   */
+  async isFree(model: string, signal?: AbortSignal): Promise<boolean> {
+    try {
+      await this.list(signal)
+    } catch {
+      return false
+    }
+    return this.freeModels.has(model)
   }
 
   /**
@@ -266,7 +316,7 @@ export class BlockrunCatalog {
     }
     const body: unknown = await response.json()
     const models = projectCatalog(this.provider, body, this.visionModels, this.maxOutputCeiling)
-    this.#cache = { models, rates: projectRates(body), fetchedAt: this.now() }
+    this.#cache = { models, rates: projectRates(body), freeModels: projectFreeModels(body), fetchedAt: this.now() }
     return models
   }
 }
@@ -429,6 +479,34 @@ export function projectRates(body: unknown): ReadonlyMap<string, ModelRates> {
     })
   }
   return rates
+}
+
+/**
+ * The ids the catalog bills as free, for every entry that says so.
+ *
+ * Free entries are not a curiosity of the price list: the gateway answers them
+ * with HTTP 200 and no x402 handshake at all, so they need no wallet and
+ * settle nothing. Measured 2026-08-30 against the live gateway —
+ * `nvidia/nemotron-3.5-lightning`, `cohere/north-mini-code` and
+ * `poolside/laguna-xs-2.1` all returned 200 unpaid, where
+ * `deepseek/deepseek-chat` returned 402.
+ *
+ * Read across the whole response rather than only the chat entries, so a
+ * caller asking about any id gets the catalog's own answer.
+ * @param body - decoded `GET /models` response.
+ * @returns every id declaring `billing_mode: "free"`.
+ */
+export function projectFreeModels(body: unknown): ReadonlySet<string> {
+  const data = (body as { data?: unknown })?.data
+  const entries: unknown[] = Array.isArray(data) ? data : Array.isArray(body) ? body : []
+  const free = new Set<string>()
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const model = entry as BlockrunCatalogModel
+    if (typeof model.id !== 'string' || model.id.length === 0) continue
+    if (model.billing_mode === FREE_BILLING_MODE) free.add(model.id)
+  }
+  return free
 }
 
 /** A usable non-negative rate; a free model's explicit 0 is kept, nonsense is dropped. */

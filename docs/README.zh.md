@@ -6,7 +6,7 @@
 
 <p>DeepSeek 又快又便宜，主循环就该继续用它。<br><br>
 <strong>这个插件补的是它做不到的事：危险命令执行前，让更强的模型先审一遍。</strong><br><br>
-<em>一个钱包直调 <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> 个模型。不注册账号，不用 API Key，不用信用卡。</em></p>
+<em>一个钱包直调 <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个模型。不注册账号，不用 API Key，不用信用卡。</em></p>
 
 <br>
 
@@ -31,7 +31,7 @@
 
 </div>
 
-> **dsh-clawrouter** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，把一个更强的模型放在智能体危险操作的前面。当智能体准备执行 `rm -rf ~`，审查模型会读一遍并给出放行 / 拒绝 / 交给你——由真实的工具执行器强制执行，而不是靠提示词劝阻。它同时注册一条 BlockRun provider 路由，让审查模型（以及全部 <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> 个模型）都能用一个钱包直接调用：不注册账号、不用 API Key，通过 [x402](https://x402.org) 用 USDC 按次付费。MIT 许可。
+> **dsh-clawrouter** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，把一个更强的模型放在智能体危险操作的前面。当智能体准备执行 `rm -rf ~`，审查模型会读一遍并给出放行 / 拒绝 / 交给你——由真实的工具执行器强制执行，而不是靠提示词劝阻。它同时注册一条 BlockRun provider 路由，让审查模型（以及全部 <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个模型）都能用一个钱包直接调用：不注册账号、不用 API Key，通过 [x402](https://x402.org) 用 USDC 按次付费。MIT 许可。
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -151,6 +151,8 @@ dsh plugin --profile web add dsh-clawrouter
 
 全都从同一条下限起步，然后分化 30 多倍。一个持有 10 万 token 上下文的编程智能体，在 DeepSeek 上每次调用约为下限的 15 倍，在 Opus 上是 500 倍。`/spend` 会在你的平均上下文很大时主动提示，并指向你自己模型的费率，而不是给一个数。它也看不见「付了钱但失败」的请求。**钱包余额才是权威。**
 
+**免费模型就是 $0，`/spend` 会如实这么写。** catalog 标记为 `free` 的那 <!-- br:models.free -->7<!-- /br:models.free --> 个模型根本走不到 x402 握手——网关直接返回 `200`，没有 `402`，所以没有签过任何报价，链上也没有任何结算。它们的行显示为 `$0  N calls  (free tier — no payment was signed)`；下面那条「大上下文」告警只按**付费调用**来计算平均值，因为一次从未被报价的调用不可能被低估。0.10.3 之前，每一次调用都会被按固定请求价记一笔，于是一整段只用免费模型的会话会报出一个完全虚构的花费。
+
 读 402 报价免费，所以上面每个数字你都可以不花钱自己复现。
 
 `requestFeeUsd` 默认 `0.002`，因为这是网关真实报的价：约 17 token 的请求，402 返回 `{"amount":"0.002000"}`。BlockRun 目前公开的价格页写的是 $0.001。
@@ -205,11 +207,13 @@ DeepSeek 没有任何视觉模型，所以这是**能力**，不是省钱。贴�
 
 但**完全不会推理的模型**是另一回事，会在**付款之前本地拒绝**：`openai/gpt-4o` 会先收钱再拒绝 `reasoning_effort`。catalog 里写明了哪些模型合格，所以这个判断不花钱。
 
-### 7. 一个钱包，<!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> 个模型
+### 7. 一个钱包，<!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个模型
 
 注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
 
 这一点在 DeepSeek 覆盖不到的模型上最有价值——Claude、GPT、Gemini、Grok，而这恰恰是「审查」需要的。
+
+其中 <!-- br:models.free -->7<!-- /br:models.free --> 个是**免费的，连钱包都不需要**：网关对 `billing_mode: "free"` 的模型直接返回 `200`，根本不会走 x402 握手，所以这条路由发这类请求时不会向你要密钥。这份名单是从 catalog 实时读取的，没有写死在这里——它变动的速度远快于本插件发版。
 
 ## 快速开始
 
@@ -224,6 +228,7 @@ export BASE_CHAIN_WALLET_KEY=0x...   # 也可以存进 credentials 服务
 
 - **用过 BlockRun 的其他工具？** 那你已经有钱包了。SDK 存在 `~/.blockrun/.session`，ClawRouter 存在 `~/.openclaw/blockrun/wallet.key`。哪个存在就导出哪个：`export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
 - **还没有钱包？** `npx -y @blockrun/clawrouter` 会生成一个并打印地址。记下地址后停掉它，往这个地址转几美元 USDC（Base 链），然后导出私钥。
+- **只想先试试？** catalog 里标记为 `free` 的那 <!-- br:models.free -->7<!-- /br:models.free --> 个模型完全不需要钱包。网关对它们返回 `200`、从不发起 x402 握手，所以 `dsh-clawrouter` 在发送之前不会去要密钥。选 `nvidia/nemotron-3.5-lightning` 或 `cohere/north-mini-code`，什么都不导出就能跑通。其余所有模型在你设置密钥之前仍然会以 `MISSING_CREDENTIAL` 失败——这个豁免是**按模型**判定的、从 catalog 读出来的，不是整体放宽。
 
 本插件**不会自己去读**这两个文件。一个「用户没配置过、却悄悄盖住了他真正配置的那个」的凭据，正是 harness 凭据机制要防的事——所以它只读你指定的那个引用。
 
@@ -273,25 +278,25 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 ## 几句实话
 
 - **这不会让 DeepSeek 变便宜。** 每次请求按它自己的 402 报价计费——小请求 $0.002，随输入规模上涨——而且 BlockRun 不计入 DeepSeek 的缓存命中折扣。一次缓存命中的智能体轮次，直连 DeepSeek 约 $0.000056，走这里在 22K 输入时约 $0.007。主循环请继续直连 DeepSeek，这个插件只用来做 DeepSeek 做不了的事。
-- **免费额度只能用来验证插件通不通，不能当主力。** 免费的 NVIDIA 模型可能会把提示词用于服务改进，别拿它对着私有代码库跑，更不要用它当审查模型。
+- **免费额度只能用来验证插件通不通，不能当主力。** 目前有 <!-- br:models.free -->7<!-- /br:models.free --> 个免费模型，而它们之所以免费，是因为有别人的条款在替你买单：其中的 NVIDIA 条目可能会把提示词用于服务改进，别拿它们对着私有代码库跑，更不要用它们当审查模型。这一层的更替也非常快——2026-08-30 当天 NVIDIA 一次性下线了 5 个免费模型里的 4 个，替补当天就补上了。本路由是实时读取名单的，所以不需要在这里发版就能跟上；但你上周指定的某个免费模型，这周可能根本就不在了。
+- **免费模型可能由另一个模型来回答。** 网关在免费层后面挂了一条 fallback 级联，而且**替换时不会报错**：连续 6 次对 `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`（免费层唯一的视觉模型）的流式请求，全部由 `nvidia/nemotron-3-nano-30b` 应答——后者完全没有视觉能力。这也正是那个条目虽然带着 `vision` 标签却被排除在 `visionModels` 之外的原因。响应的 `model` 字段其实写明了实际服务的模型，只是本路由**没有读它**，所以 `/spend`、harness 以及每一条报错都会把这次调用算在你请求的那个模型头上。已向上游反馈：BlockRunAI/blockrun#450。
 - **每次审查都是一次模型调用**，只在命中风险规则时触发，上限 30 秒。
 - **审查模型只看到被标记的那一次工具调用**，不会看到整个仓库。
 
 ## 已知限制
 
-- **图片会被明确拒绝，而不是被悄悄丢掉**——走这条路由发送图片内容会以 `UNSUPPORTED` 失败；视觉能力在计划中。
-- **推理档位（reasoning effort）同样是明确拒绝**，不会被静默忽略。
+- **只有实测不接受图片的模型才会拒绝图片**——`visionModels` 是真正对着一张图答对了的集合，光有 `vision` 标签不够：有好几个带标签的模型会先收钱再失败。目前排除 6 个，见第 5 节。（这一条以前写的是「图片会被明确拒绝，视觉能力在计划中」，旁边还有一条说推理档位同样被拒绝。两个能力都在 0.10.0 就发布了，而这两条说明又活了三个版本——而且恰恰活在读者专门用来查「什么不能用」的那一节里。）
 - **中断请求会立刻停止投递，但底层 HTTP 请求本身还取消不了**——要等 `@blockrun/llm` 支持 `AbortSignal`，目前连接会在 SDK 自己的超时后关闭。
 - **本插件不记录自己花了多少钱。** Harness 的会话日志会拒绝它不认识的事件类型，而仓库外的插件无法把自己的事件标记为可忽略，所以它不写任何会话事件。它也不会写进 `~/.blockrun/cost_log.jsonl`：那个账本是 `@blockrun/llm` 的 `LLMClient` 写的，而本适配器用的流式客户端只在内存里累计。目前请直接看钱包余额——这条说明的早先版本指向了那个账本，那会让你看到的是**其他工具**的花费，而不是本插件的。
 - **智能路由（`blockrun/auto`）尚未接入**，缺的不是路由器。虚拟模型必须报告**一个**上下文窗口，而 Harness 用它来决定何时压缩：报最大的，某一轮路由到小模型时会直接溢出且压缩永不触发；报最小的，所有会话都会过早压缩。在这个问题有诚实答案之前，请直接指定模型 id —— `auxiliaryModel` 已经把真正花钱的维护调用挪走了，省钱的部分本来就在那里。
 - **压缩可能比需要的时机更早触发。** 本路由报告的是网关模型目录里声明的上下文窗口。对着真实网关实测：`openai/gpt-4.1-nano` 接受了 **450,037** token 的输入，并正确复述了第一行的标记——没有截断，但这是目录声明的 128,000 的 3.5 倍。Harness 是按声明值来决定何时压缩的，所以会话可能在模型其实还吃得下的时候就压缩了。已向上游反馈；本插件如实报告目录的值而不是往高了猜——猜高了就是拿「提前压缩」换「静默溢出」。
 - **上下文溢出是靠请求大小判定的，不是靠错误文案。** 真实溢出从网关返回的是 `{"message":"API request failed"}`——厂商原始文案被清洗掉了，常规的文本检测器什么都匹配不到。所以在收到 400 之后，如果请求本身已经超过该模型声明的窗口，就按溢出处理，好让压缩能够恢复。文本检测器仍然优先，所以网关哪天不再清洗，这里会自动回到正轨。
-- **上一轮的 reasoning 不会回传。** DeepSeek 的思考模式文档要求在带 tool call 的轮次回传 `reasoning_content`，但这一条路由要服务 <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> 个来自不同厂商的模型——某一家要求的字段，另一家可能直接拒绝。所以推理模型配合多步工具调用时效果可能略有下降，遇到了请反馈。
+- **上一轮的 reasoning 不会回传。** DeepSeek 的思考模式文档要求在带 tool call 的轮次回传 `reasoning_content`，但这一条路由要服务 <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> 个来自不同厂商的模型——某一家要求的字段，另一家可能直接拒绝。所以推理模型配合多步工具调用时效果可能略有下降，遇到了请反馈。
 
 ## 开发
 
 ```sh
-npm test          # 185 个离线测试，含两套走真实 cordis Loader 的组合测试
+npm test          # 398 个离线测试，含两套走真实 cordis Loader 的组合测试
 npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
 npm run sync:models  # 从实时 catalog 刷新两份 README 里的模型数量
 npm run test:docker  # 在干净容器里安装**已发布**的包，验证它能组装起来

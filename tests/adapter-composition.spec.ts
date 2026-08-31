@@ -1,11 +1,13 @@
 // End-to-end proof that the provider route mounts through the real Loader and
 // that a missing wallet fails LOUD, naming the credential — rather than
 // surfacing later as an opaque SDK constructor throw mid-turn.
+import { createServer } from 'node:http'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
@@ -20,11 +22,44 @@ import * as Clawrouter from '../src/index.ts'
 let root: string | undefined
 let context: Context | undefined
 
+// A local catalog, because the harness resolves a model through the seam
+// before it ever calls `stream` — so these tests read a model list whether or
+// not they get as far as dispatching anything. Serving it here keeps them
+// offline and makes the entries they assert against fixed.
+const CATALOG = {
+  data: [
+    { id: 'deepseek/deepseek-chat', name: 'Flash', categories: ['chat'], context_window: 1_000_000, billing_mode: 'paid' },
+    {
+      id: 'nvidia/nemotron-3.5-lightning',
+      name: 'Lightning',
+      categories: ['chat'],
+      context_window: 1_000_000,
+      billing_mode: 'free',
+    },
+  ],
+}
+
+let gateway: ReturnType<typeof createServer> | undefined
+let apiUrl = ''
+
+beforeEach(async () => {
+  gateway = createServer((req, res) => {
+    // Only the catalog is served. A request that reaches the chat path has
+    // already failed the assertion it was written for.
+    res.writeHead(req.url?.endsWith('/models') === true ? 200 : 500, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(CATALOG))
+  })
+  await new Promise<void>(resolve => gateway!.listen(0, '127.0.0.1', resolve))
+  apiUrl = `http://127.0.0.1:${(gateway!.address() as AddressInfo).port}/api`
+})
+
 afterEach(async () => {
   await context?.fiber.dispose()
   context = undefined
   if (root !== undefined) await rm(root, { recursive: true, force: true })
   root = undefined
+  await new Promise<void>(resolve => gateway?.close(() => resolve()))
+  gateway = undefined
 })
 
 /** Boot a real cordis.yml carrying the given adapter config lines. */
@@ -90,6 +125,11 @@ function failureCode(chunks: readonly StreamChunk[]): string | undefined {
 // of what the machine running these tests happens to export.
 const ABSENT = ["    walletKeyEnv: 'DSH_CLAWROUTER_TEST_ABSENT_KEY'"]
 
+/** Point the route at the local catalog above rather than the live gateway. */
+function local(): string[] {
+  return [`    apiUrl: '${apiUrl}'`]
+}
+
 describe('provider route, booted through the real Loader', () => {
   it('registers the blockrun route and reports its display name', async () => {
     const ctx = await boot(ABSENT)
@@ -105,16 +145,18 @@ describe('provider route, booted through the real Loader', () => {
   }, 30_000)
 
   it('fails a request with MISSING_CREDENTIAL when no wallet is configured', async () => {
-    const ctx = await boot(ABSENT)
-    // Fails before any network I/O, naming the reference — BlockRun has no API
-    // key to paste, so the diagnostic has to say what to set instead.
+    const ctx = await boot([...ABSENT, ...local()])
+    // Fails before any request is dispatched, naming the reference — BlockRun
+    // has no API key to paste, so the diagnostic has to say what to set
+    // instead. `deepseek/deepseek-chat` is a paid model, and a paid model is
+    // still refused outright without a key; only the free tier is exempt.
     expect(failureCode(await drain(ctx, 'blockrun'))).toBe('MISSING_CREDENTIAL')
   }, 30_000)
 
   it('fails with INVALID_CREDENTIAL when the wallet key is not a usable EVM key', async () => {
     process.env['DSH_CLAWROUTER_TEST_BAD_KEY'] = 'not-a-private-key'
     try {
-      const ctx = await boot(["    walletKeyEnv: 'DSH_CLAWROUTER_TEST_BAD_KEY'"])
+      const ctx = await boot(["    walletKeyEnv: 'DSH_CLAWROUTER_TEST_BAD_KEY'", ...local()])
       expect(failureCode(await drain(ctx, 'blockrun'))).toBe('INVALID_CREDENTIAL')
     } finally {
       delete process.env['DSH_CLAWROUTER_TEST_BAD_KEY']

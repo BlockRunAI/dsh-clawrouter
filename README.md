@@ -6,7 +6,7 @@
 
 <p>DeepSeek is fast and cheap — keep it for the loop.<br><br>
 <strong>This adds what it cannot do: a stronger model reviews the dangerous command before it runs.</strong><br><br>
-<em><!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> models from one wallet. No accounts. No API keys. No credit card.</em></p>
+<em><!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models from one wallet. No accounts. No API keys. No credit card.</em></p>
 
 <br>
 
@@ -31,7 +31,7 @@ English | [中文](https://github.com/BlockRunAI/dsh-clawrouter/blob/main/docs/R
 
 </div>
 
-> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> models) is reachable from one wallet with no accounts and no API keys, paid per request in USDC over [x402](https://x402.org). MIT licensed.
+> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models) is reachable from one wallet with no accounts and no API keys, paid per request in USDC over [x402](https://x402.org). MIT licensed.
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -157,6 +157,8 @@ Two things follow, and the second one costs real money.
 
 Everything starts at the same floor and then diverges by more than thirty-fold. A coding agent holding a 100K-token context pays roughly fifteen times the floor per call on DeepSeek — and five hundred times on Opus. `/spend` says so whenever your average call carries a large context, and points you at your own model's rate rather than one number. It is also blind to a request that failed after paying. Your wallet balance is the authority.
 
+**A free model is $0, and `/spend` says so.** The <!-- br:models.free -->7<!-- /br:models.free --> models the catalog bills as `free` never reach the x402 handshake — the gateway answers them with `200` and no `402`, so no quote is signed and nothing settles. Their rows read `$0  N calls  (free tier — no payment was signed)`, and the large-context warning below is computed from the paid calls alone, since a call that was never quoted cannot be under-quoted. Before 0.10.3 every call was charged the flat request price regardless, so a session spent trying the free tier reported a cost that was entirely invented.
+
 Reading a 402 quote is free, so every figure above is reproducible without spending anything.
 
 The default `requestFeeUsd` is `0.002` because that is what the gateway quotes: a 402 for a ~17-token request returns `{"amount":"0.002000"}`. BlockRun's published pricing page currently says $0.001.
@@ -211,11 +213,13 @@ Reasoning models get `high` and `max`, declared per model from the catalog's `re
 
 Asking a model that does not reason at all is a different case, and is refused **locally, before paying**: `openai/gpt-4o` charges and then rejects `reasoning_effort` outright. The catalog says which models qualify, so that costs nothing to discover.
 
-### 7. <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> models from one wallet
+### 7. <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models from one wallet
 
 Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account.
 
 That matters most for models DeepSeek does not serve — Claude, GPT, Gemini, Grok — which is exactly what a reviewer needs.
+
+<!-- br:models.free -->7<!-- /br:models.free --> of them are free and need no wallet either: the gateway serves a `billing_mode: "free"` model unpaid, so this route sends one without asking for a key. The list is read live from the catalog rather than pinned here, because it changes faster than this plugin releases.
 
 ## Quick Start
 
@@ -230,6 +234,7 @@ export BASE_CHAIN_WALLET_KEY=0x...   # or store it via the credentials service
 
 - **Already run a BlockRun tool?** You have a wallet already. The SDK keeps it at `~/.blockrun/.session`, ClawRouter at `~/.openclaw/blockrun/wallet.key`. Export whichever exists: `export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
 - **No wallet yet?** `npx -y @blockrun/clawrouter` generates one and prints its address. Stop it once you have the address, send it a few USDC on Base, then export the key.
+- **Just want to try it?** The <!-- br:models.free -->7<!-- /br:models.free --> models the catalog bills as `free` need no wallet at all. The gateway answers them with `200` and never opens the x402 handshake, so `dsh-clawrouter` does not ask for a key before sending one. Pick `nvidia/nemotron-3.5-lightning` or `cohere/north-mini-code` and it works with nothing exported. Every other model still fails with `MISSING_CREDENTIAL` until you set the key — the exemption is per model, read from the catalog, not a general loosening.
 
 This plugin reads neither file on its own. A credential nobody configured, quietly shadowing the one they did, is exactly what the harness credentials seam exists to prevent — so it only ever reads the reference you name.
 
@@ -279,25 +284,25 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 ## Honest notes
 
 - **This will not make DeepSeek cheaper.** Each request is priced from its own 402 quote — $0.002 at small sizes, climbing with input — and BlockRun does not price DeepSeek's cache-hit discount. A cache-warm agent turn costs DeepSeek about $0.000056 directly against roughly $0.007 here at 22K input tokens. Keep your DeepSeek key for the loop; use this for what DeepSeek cannot do.
-- **The free tier is a smoke test, not a workhorse.** The free NVIDIA models may use prompts for service improvement, so do not point them at a private codebase, and never use one as the reviewer.
+- **The free tier is a smoke test, not a workhorse.** <!-- br:models.free -->7<!-- /br:models.free --> models are free right now, and they are free because someone else's terms pay for them: the NVIDIA entries may use prompts for service improvement, so do not point them at a private codebase, and never use one as the reviewer. It also turns over fast — on 2026-08-30 NVIDIA retired four of the five free models in a single sweep, and the replacements arrived the same day. This route reads the list live, so it follows those changes without a release here, but a free model you pinned last week may simply not be there.
+- **A free model can answer as a different model.** The gateway keeps a fallback cascade behind the free tier, and it substitutes without failing: six consecutive streamed requests for `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` — the free tier's only vision model — were all served by `nvidia/nemotron-3-nano-30b`, which has no vision at all. That is why that entry is excluded from `visionModels` despite carrying the tag. The response does name the substitute in its `model` field; this route does not read it, so `/spend`, the harness and every error message attribute the call to the model you asked for. Reported upstream as BlockRunAI/blockrun#450.
 - **A review costs a model call.** It runs only on flagged calls, with a 30s ceiling.
 - **The reviewer sees the flagged tool call**, not your whole repository.
 
 ## Known limitations
 
-- **Images are refused, not silently dropped** — image content through this route fails with `UNSUPPORTED`; vision is planned.
-- **Reasoning-effort selection is refused** rather than quietly ignored.
+- **An image is refused for a model measured not to accept one** — `visionModels` is the set that answered a real image correctly, and the `vision` tag alone is not enough, since several tagged models charge and then fail. Six are excluded; see section 5. (This bullet used to read "images are refused, vision is planned", beside another saying reasoning effort was refused too. Both shipped in 0.10.0 and both bullets outlived them by three releases, describing a plugin that no longer exists — in the section a reader consults precisely to find out what does not work.)
 - **An aborted request stops delivery immediately, but the in-flight HTTP request is not itself cancelled** until `@blockrun/llm` accepts an `AbortSignal`; the socket closes on the SDK's own timeout.
 - **This plugin does not record what it spends.** Harness session logs refuse event types a build does not know, and an out-of-repo plugin cannot mark its events ignorable, so it writes no session events. It also does not reach `~/.blockrun/cost_log.jsonl`: that ledger is written by `@blockrun/llm`'s `LLMClient`, and the streaming client this adapter uses tracks its spend in memory only. Check the wallet itself for now — an earlier version of this note pointed at the ledger, which would have shown you other tools' spending rather than this one's.
 - **Smart routing (`blockrun/auto`) is not wired up**, and not for lack of a router. A virtual model has to report one context window, and the harness sizes compaction from it: report the largest candidate and a turn routed to a smaller model overflows with compaction never firing; report the smallest and every session compacts far too early. Until that has an honest answer, pin a model id — `auxiliaryModel` already moves the expensive maintenance calls, which is where the savings actually were.
 - **Compaction may fire earlier than it needs to.** This route reports the context window the gateway's model catalog declares. Measured against the live gateway, `openai/gpt-4.1-nano` accepted a 450,037-token prompt and recalled a marker from the very first line — no truncation, but 3.5x the 128,000 the catalog states. The harness sizes compaction from the declared figure, so a session can compact while the model would still have taken the whole thing. Reported upstream; this plugin reports what the catalog says rather than guessing higher, because over-claiming would trade early compaction for silent overflow.
 - **Context overflow is detected by request size, not by the error text.** A real overflow comes back from the gateway as `{"message":"API request failed"}` — the provider's wording is sanitized away, so the usual text detectors match nothing. After a 400, a request larger than the model's declared window is therefore treated as an overflow so compaction can recover. The text detectors still run first, so this corrects itself if the gateway stops sanitizing.
-- **Prior-turn reasoning is not sent back.** DeepSeek's thinking-mode guide says `reasoning_content` should be returned on tool-call turns, but this one route serves <!-- br:models.chatVisible -->68<!-- /br:models.chatVisible --> models from many vendors, and a field one of them requires is a field another may reject. Multi-step tool use on a reasoning model may be slightly degraded as a result; please report it if you hit it.
+- **Prior-turn reasoning is not sent back.** DeepSeek's thinking-mode guide says `reasoning_content` should be returned on tool-call turns, but this one route serves <!-- br:models.chatVisible -->70<!-- /br:models.chatVisible --> models from many vendors, and a field one of them requires is a field another may reject. Multi-step tool use on a reasoning model may be slightly degraded as a result; please report it if you hit it.
 
 ## Development
 
 ```sh
-npm test          # 185 offline tests, including two real-cordis-Loader compositions
+npm test          # 398 offline tests, including two real-cordis-Loader compositions
 npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
 npm run sync:models  # refresh the model count in both READMEs from the live catalog
 npm run test:docker  # install the PUBLISHED package in a clean container and assert it composes

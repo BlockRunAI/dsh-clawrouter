@@ -2,15 +2,20 @@
  * The BlockRun `LlmAdapter`: one harness provider route whose authentication is
  * a wallet signature rather than an API key.
  *
- * Every request is paid per call in USDC over x402 — the gateway answers an
- * unpaid request with `402`, the client signs an EIP-3009 authorization
+ * Almost every request is paid per call in USDC over x402 — the gateway answers
+ * an unpaid request with `402`, the client signs an EIP-3009 authorization
  * locally, and the retry carries it. That handshake is why this route cannot be
  * expressed as a static-credential gateway row: no header value exists ahead of
  * the request.
  *
+ * The exception is the free tier, which never reaches that handshake at all:
+ * the gateway answers a `billing_mode: "free"` model with `200` and no `402`,
+ * so those models need no wallet and cost nothing. See {@link freeTierKey}.
+ *
  * @module dsh-clawrouter/adapter
  */
 
+import { randomBytes } from 'node:crypto'
 import { BlockrunClient } from '@blockrun/llm'
 import {
   CONTEXT_WINDOW_EXCEEDED_CODE,
@@ -170,13 +175,23 @@ export class BlockrunAdapter extends LlmAdapter {
    * @throws LlmError for credential, transport, and protocol failures.
    */
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    // Credential first: it is a local check, and a deployment with no wallet
-    // has a more fundamental problem than whichever model it named.
-    const privateKey = await this.#options.resolveWalletKey()
     const connection = this.#options.connection()
     const model = auxiliaryModelFor(options, connection)
     await this.#assertServable(model, options.signal)
     if (options.reasoningEffort !== undefined) await this.#assertReasons(model, options.signal)
+    // Which model was named decides whether a credential is needed at all, so
+    // this has to come after the model is resolved. The credential used to be
+    // checked first, on the reasoning that a deployment with no wallet had a
+    // more fundamental problem than whichever model it named — which was true
+    // while every model cost money. It stopped being true: as of 2026-08-30
+    // the catalog bills seven of the seventy chat models as free and the
+    // gateway answers those unpaid, so demanding a funded wallet before one of
+    // them closed off the whole "no accounts, no API keys, try it now" path.
+    //
+    // The catalog read this needs is not an extra one; `#assertServable` above
+    // has already made it, and answers from the same cache.
+    const free = await this.#options.catalog.isFree(model, options.signal)
+    const privateKey = free ? freeTierKey() : await this.#options.resolveWalletKey()
     const body = await buildRequestBody(
       model === options.model ? options : { ...options, model },
       this.#options.resolveImage,
@@ -202,18 +217,22 @@ export class BlockrunAdapter extends LlmAdapter {
         try {
           next = await iterator.next()
         } catch (error) {
-          throw asLlmError(error, looksOversized(bodyChars, capacity), client.getWalletAddress())
+          throw asLlmError(
+            error,
+            looksOversized(bodyChars, capacity),
+            free ? { kind: 'free-tier', model } : { kind: 'wallet', address: client.getWalletAddress() },
+          )
         }
         if (next.done === true) break
         // Checked again after the await: a turn cancelled while this read was
         // outstanding must not emit the chunk it was waiting on.
         throwIfAborted(options.signal)
-        yield * this.#metered(model, translator.accept(next.value))
+        yield * this.#metered(model, free, translator.accept(next.value))
       }
       // The terminal flush is metered too, and it is the one that counts: the
       // translator BUFFERS usage and emits it from `end()`, so watching only
       // the per-chunk output recorded nothing at all.
-      yield * this.#metered(model, translator.end())
+      yield * this.#metered(model, free, translator.end())
     } finally {
       // Terminating the generator releases the SDK's reader. The in-flight
       // HTTP request is not itself cancellable until `BlockrunClient.stream`
@@ -232,14 +251,15 @@ export class BlockrunAdapter extends LlmAdapter {
    * Counted from the provider's own report, so a call that never sent one is
    * never guessed at — it simply does not appear in the total.
    * @param model - the model that served the call.
+   * @param free - whether the gateway served it without payment.
    * @param chunks - chunks about to be yielded.
    * @returns the same chunks, unchanged.
    */
-  #metered(model: string, chunks: readonly StreamChunk[]): readonly StreamChunk[] {
+  #metered(model: string, free: boolean, chunks: readonly StreamChunk[]): readonly StreamChunk[] {
     const meter = this.#options.meter
     if (meter !== undefined) {
       for (const chunk of chunks) {
-        if (chunk.type === 'usage') meter.record(model, chunk.usage)
+        if (chunk.type === 'usage') meter.record(model, chunk.usage, free)
       }
     }
     return chunks
@@ -321,6 +341,39 @@ export function auxiliaryModelFor(
   return auxiliary !== undefined && auxiliary.length > 0 ? auxiliary : options.model
 }
 
+/** Lazily generated once per process; see {@link freeTierKey}. */
+let ephemeralKey: string | undefined
+
+/**
+ * A throwaway key standing in for a wallet on a free-tier request.
+ *
+ * `BlockrunClient` requires a private key in its constructor — it derives the
+ * address it would pay from — and refuses to be built without one, falling
+ * back to reading `BASE_CHAIN_WALLET_KEY` from the ambient environment if the
+ * option is omitted. Neither is acceptable here: a free model needs no wallet,
+ * and silently picking up whatever key happens to be exported is exactly the
+ * shadowing that {@link ../index.ts | the credentials seam} exists to prevent.
+ *
+ * So a random one is generated instead. It is never used to sign anything: the
+ * signing path runs only when the gateway answers `402`, and a free model
+ * answers `200` — verified against the live gateway, where an unpaid request
+ * to `nvidia/nemotron-3.5-lightning` returned `200` and the same request to
+ * `deepseek/deepseek-chat` returned `402`. Nothing is derived from it that
+ * outlives the process, and no funds can reach an address nobody is told.
+ *
+ * Generated once rather than per request, because deriving the address costs a
+ * secp256k1 multiplication and a fresh key buys nothing when it signs nothing.
+ * 32 random bytes are a valid secp256k1 scalar with probability
+ * 1 - 2^-128; the remainder is not worth a retry loop that could never be
+ * covered by a test.
+ *
+ * @returns the process's ephemeral free-tier key.
+ */
+function freeTierKey(): string {
+  ephemeralKey ??= `0x${randomBytes(32).toString('hex')}`
+  return ephemeralKey
+}
+
 /**
  * The "did you mean" tail of an unknown-model diagnostic.
  *
@@ -387,7 +440,39 @@ function failureDetail(error: unknown): string {
  * `@blockrun/llm` reports HTTP status as `statusCode`; `status` is accepted
  * too so an error from any other layer still carries its status through.
  */
-function asLlmError(error: unknown, oversized = false, walletAddress?: string): LlmError {
+/**
+ * What a `PAYMENT_REQUIRED` failure should tell the reader to do about it.
+ *
+ * The two cases need opposite advice, and getting it wrong wastes real money:
+ * a `wallet` request is short of funds at a known address, while a `free-tier`
+ * request was paying from {@link freeTierKey}'s throwaway key — so naming that
+ * address would invite the reader to send USDC to a key this process discards
+ * on exit.
+ */
+type PaymentContext =
+  | { kind: 'wallet'; address?: string }
+  | { kind: 'free-tier'; model: string }
+
+/** The sentence a payment failure appends, or nothing when it is not one. */
+function fundingAdvice(context: PaymentContext | undefined): string {
+  if (context === undefined) return ''
+  // A payment failure is the one case where the reader needs a fact only this
+  // process holds. They configured a private key; the thing to send USDC to is
+  // the address derived from it, which they have no way to work out from the
+  // variable they set.
+  if (context.kind === 'wallet') {
+    return context.address === undefined ? '' : ` Send USDC on Base to ${context.address}, then retry.`
+  }
+  // The catalog said this model was free and the gateway then asked to be
+  // paid, so the catalog is stale — the free tier turns over fast enough for
+  // that to be the ordinary explanation rather than a corner case. Nothing the
+  // reader can send money to helps until a real wallet key is configured.
+  return ` "${context.model}" is listed as a free model, so this request carried no wallet.`
+    + ' The gateway asked to be paid, which means it has been repriced since the catalog was read.'
+    + ' Configure a funded wallet key (walletKeyEnv) to keep using it.'
+}
+
+function asLlmError(error: unknown, oversized = false, payment?: PaymentContext): LlmError {
   if (error instanceof LlmError) return error
   const message = error instanceof Error ? error.message : String(error)
   const raw = (error as { statusCode?: unknown; status?: unknown })
@@ -404,13 +489,7 @@ function asLlmError(error: unknown, oversized = false, walletAddress?: string): 
   // The text detectors get first say, so this stays correct the moment the
   // gateway stops sanitizing upstream errors away.
   const code = mapped === 'INVALID_REQUEST' && oversized ? CONTEXT_WINDOW_EXCEEDED_CODE : mapped
-  // A payment failure is the one case where the reader needs a fact only this
-  // process holds. They configured a private key; the thing to send USDC to is
-  // the address derived from it, which they have no way to work out from the
-  // variable they set.
-  const funding = code === 'PAYMENT_REQUIRED' && walletAddress !== undefined
-    ? ` Send USDC on Base to ${walletAddress}, then retry.`
-    : ''
+  const funding = code === 'PAYMENT_REQUIRED' ? fundingAdvice(payment) : ''
   return new LlmError(`BlockRun request failed: ${message}${funding}`, code, {
     cause: error,
     ...status === undefined ? {} : { status },

@@ -173,6 +173,8 @@ export function apply(ctx: Context, config: Config): void {
     throw new LlmError(
       `dsh-clawrouter: no wallet key for provider route "${provider}".`
       + ' BlockRun authenticates with a wallet signature — there is no API key to paste.\n'
+      + '  Want to try the route first? The models the catalog bills as `free` need no wallet at all\n'
+      + '  and are reachable right now; this failure is only for the ones that charge.\n'
       + '  Have a BlockRun wallet already? Look in ~/.blockrun/.session or ~/.openclaw/blockrun/wallet.key:\n'
       + `      export ${ref}=$(cat ~/.blockrun/.session)\n`
       + '  No wallet yet? `npx -y @blockrun/clawrouter` generates one and prints its address;\n'

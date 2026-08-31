@@ -161,13 +161,32 @@ describe('the generated model count is actually generated', () => {
   //
   // `npm run sync:models` fills them now. This checks the offline half — that
   // the sites agree — and tests/live.e2e.ts checks them against the gateway.
-  const MARKER = /<!-- br:models\.chatVisible -->(\d+)<!-- \/br:models\.chatVisible -->/g
+  const marker = (name: string): RegExp =>
+    new RegExp(`<!-- br:models\\.${name} -->(\\d+)<!-- \\/br:models\\.${name} -->`, 'g')
 
-  it('every marker in both READMEs carries the same count', () => {
-    const counts = [EN, ZH].flatMap(doc => [...doc.matchAll(MARKER)].map(match => Number(match[1])))
-    expect(counts.length, 'no model-count markers found').toBeGreaterThan(1)
+  it.each([['chatVisible'], ['free']])('every %s marker in both READMEs carries the same count', (name) => {
+    const counts = [EN, ZH].flatMap(doc => [...doc.matchAll(marker(name))].map(match => Number(match[1])))
+    expect(counts.length, `no ${name} markers found`).toBeGreaterThan(1)
     expect(new Set(counts), `markers disagree: ${[...new Set(counts)].join(', ')}`).toHaveProperty('size', 1)
-    expect(counts[0]).toBeGreaterThan(0)
+  })
+
+  it('states the same number of markers in each language', () => {
+    // A sentence added to one README and not the other is how the two counts
+    // drifted apart the first time: `sync:models` rewrites whatever markers it
+    // finds, so a site that exists in only one language stays correct and the
+    // documents still disagree about how many places make the claim.
+    for (const name of ['chatVisible', 'free']) {
+      expect([...ZH.matchAll(marker(name))]).toHaveLength([...EN.matchAll(marker(name))].length)
+    }
+  })
+
+  it('cannot claim more free models than the route serves', () => {
+    // Both are generated from the same catalog read, so this is not arithmetic
+    // the script could get wrong — it is a guard on the markers being wired to
+    // the right counts. They were briefly identical regexes.
+    const first = (doc: string, name: string): number => Number([...doc.matchAll(marker(name))][0]?.[1])
+    expect(first(EN, 'free')).toBeLessThanOrEqual(first(EN, 'chatVisible'))
+    expect(first(EN, 'chatVisible')).toBeGreaterThan(0)
   })
 })
 

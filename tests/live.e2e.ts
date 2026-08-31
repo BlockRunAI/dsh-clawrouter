@@ -16,7 +16,7 @@ import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from '../src/adapter.ts'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
-import { BlockrunCatalog, projectCatalog } from '../src/catalog.ts'
+import { BlockrunCatalog, projectCatalog, projectFreeModels } from '../src/catalog.ts'
 import { buildReviewPrompt, matchRisk, parseVerdict, REVIEW_SYSTEM_PROMPT } from '../src/reviewer.ts'
 
 const API_URL = 'https://blockrun.ai/api'
@@ -292,12 +292,22 @@ describe('the README model count matches the live catalog', () => {
   it('counts what projectCatalog exposes today', async () => {
     const response = await fetch(`${API_URL}/v1/models`)
     expect(response.ok).toBe(true)
-    const live = projectCatalog('blockrun', await response.json()).length
-    const claimed = Number(
-      readFileSync('README.md', 'utf8').match(/<!-- br:models\.chatVisible -->(\d+)</)?.[1],
-    )
+    const body = await response.json()
+    const models = projectCatalog('blockrun', body)
+    const live = models.length
+    const doc = readFileSync('README.md', 'utf8')
+    const claimed = Number(doc.match(/<!-- br:models\.chatVisible -->(\d+)</)?.[1])
     expect(live, 'catalog returned nothing usable').toBeGreaterThan(0)
     expect(claimed, `README says ${claimed}, catalog exposes ${live}; run \`npm run sync:models\``).toBe(live)
+
+    // The free tier moves fastest of anything documented here — four of five
+    // free models were retired in one morning — so its marker is the one most
+    // likely to be stale, and the only place that can say so is the gateway.
+    const free = projectFreeModels(body)
+    const liveFree = models.filter(model => free.has(model.id)).length
+    const claimedFree = Number(doc.match(/<!-- br:models\.free -->(\d+)</)?.[1])
+    expect(claimedFree, `README says ${claimedFree} free, catalog serves ${liveFree}; run \`npm run sync:models\``)
+      .toBe(liveFree)
   })
 })
 

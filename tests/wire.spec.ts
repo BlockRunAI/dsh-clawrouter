@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { LlmError } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from '../src/adapter.ts'
 import { BlockrunCatalog } from '../src/catalog.ts'
 import { SpendMeter } from '../src/spend.ts'
@@ -18,7 +19,20 @@ const CATALOG = {
   data: [
     { id: 'anthropic/claude-opus-5', name: 'Opus', categories: ['chat'], context_window: 200_000 },
     { id: 'deepseek/deepseek-chat', name: 'Flash', categories: ['chat'], context_window: 1_000_000 },
+    {
+      id: 'nvidia/nemotron-3.5-lightning',
+      name: 'Lightning',
+      categories: ['chat'],
+      billing_mode: 'free',
+      pricing: { input: 0, output: 0 },
+      context_window: 1_000_000,
+    },
   ],
+}
+
+/** A resolver standing in for a deployment that has configured no wallet at all. */
+function noWallet(): Promise<string> {
+  return Promise.reject(new LlmError('no wallet key configured', 'MISSING_CREDENTIAL'))
 }
 
 /** Every chat request body the server received, in order. */
@@ -55,11 +69,15 @@ afterEach(async () => {
 })
 
 /** An adapter pointed at the local server. */
-function adapter(auxiliaryModel?: string, meter?: SpendMeter): BlockrunAdapter {
+function adapter(
+  auxiliaryModel?: string,
+  meter?: SpendMeter,
+  resolveWalletKey: () => Promise<string> = () => Promise.resolve(DUMMY_KEY),
+): BlockrunAdapter {
   return new BlockrunAdapter({
     provider: 'blockrun',
     connection: () => ({ apiUrl, timeoutMs: 10_000, ...auxiliaryModel === undefined ? {} : { auxiliaryModel } }),
-    resolveWalletKey: () => Promise.resolve(DUMMY_KEY),
+    resolveWalletKey,
     catalog: new BlockrunCatalog('blockrun', `${apiUrl}/v1`),
     ...meter === undefined ? {} : { meter },
   })
@@ -143,3 +161,56 @@ describe('spend metering through a real request', () => {
   })
 })
 
+
+describe('the free tier does not ask for a wallet', () => {
+  // Measured against the live gateway on 2026-08-30: an unpaid POST to
+  // nvidia/nemotron-3.5-lightning returns HTTP 200, where the same POST to
+  // deepseek/deepseek-chat returns 402. Free models never reach the x402
+  // handshake, so requiring a funded wallet before one of them refused the
+  // entire "no accounts, no API keys, try it now" path the route is for.
+
+  it('dispatches a free model with no wallet configured at all', async () => {
+    const chunks = await run(adapter(undefined, undefined, noWallet), { model: 'nvidia/nemotron-3.5-lightning' })
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]?.['model']).toBe('nvidia/nemotron-3.5-lightning')
+    expect(chunks.filter(c => c.type === 'text-delta').map(c => c.text).join('')).toBe('ok')
+  })
+
+  it('still refuses a paid model with no wallet', async () => {
+    // The exemption is per model, read from the catalog — not a general
+    // loosening of the credential requirement.
+    await expect(run(adapter(undefined, undefined, noWallet))).rejects.toThrow(/no wallet key configured/)
+    expect(bodies).toHaveLength(0)
+  })
+
+  it('does not consult the wallet for a free model even when one is configured', async () => {
+    let resolved = 0
+    const counting = (): Promise<string> => {
+      resolved += 1
+      return Promise.resolve(DUMMY_KEY)
+    }
+    await run(adapter(undefined, undefined, counting), { model: 'nvidia/nemotron-3.5-lightning' })
+    expect(resolved).toBe(0)
+    await run(adapter(undefined, undefined, counting))
+    expect(resolved).toBe(1)
+  })
+
+  it('records a free call at $0 through the streaming path', async () => {
+    const meter = new SpendMeter(0.002)
+    await run(adapter(undefined, meter, noWallet), { model: 'nvidia/nemotron-3.5-lightning' })
+    const summary = meter.summary()
+    // The call happened and its tokens are counted; only the money is absent.
+    expect(summary.calls).toBe(1)
+    expect(summary.inputTokens).toBe(10)
+    expect(summary.totalUsd).toBe(0)
+    expect(summary.byModel[0]?.free).toBe(true)
+  })
+
+  it('routes a free auxiliary model without a wallet too', async () => {
+    // auxiliaryModel is the one place the model that leaves this process is
+    // not the one the caller named, so free-tier status has to be read from
+    // the substituted id rather than the requested one.
+    await run(adapter('nvidia/nemotron-3.5-lightning', undefined, noWallet), { purpose: 'compaction' })
+    expect(bodies[0]?.['model']).toBe('nvidia/nemotron-3.5-lightning')
+  })
+})

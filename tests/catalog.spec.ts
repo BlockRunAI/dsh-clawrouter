@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS, projectCatalog, suggestModels } from '../src/catalog.ts'
+import {
+  BlockrunCatalog,
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_TOKENS,
+  projectCatalog,
+  projectFreeModels,
+  suggestModels,
+} from '../src/catalog.ts'
 
 /** An entry in the exact shape `GET /api/v1/models` really returns. */
 const deepseekChat = {
@@ -203,5 +210,72 @@ describe('the default output cap is a money decision', () => {
       data: [{ id: 'x', categories: ['chat'], max_output: 128_000 }],
     }, undefined, 32_000)
     expect(model?.defaultMaxTokens).toBe(32_000)
+  })
+})
+
+describe('free models, read from billing_mode', () => {
+  // Free is not a price of zero, it is a different protocol: the gateway
+  // answers a free model with HTTP 200 and never opens an x402 handshake at
+  // all. Measured 2026-08-30 against the live gateway — an unpaid request to
+  // nvidia/nemotron-3.5-lightning, cohere/north-mini-code and
+  // poolside/laguna-xs-2.1 each returned 200, while deepseek/deepseek-chat
+  // returned 402. So this flag decides two things a price never could: whether
+  // the request needs a wallet key, and whether the call cost anything.
+  const CATALOG = {
+    data: [
+      deepseekChat,
+      { id: 'nvidia/nemotron-3.5-lightning', categories: ['chat', 'reasoning'], billing_mode: 'free', pricing: { input: 0, output: 0 } },
+      { id: 'cohere/north-mini-code', categories: ['chat', 'coding'], billing_mode: 'free', pricing: { input: 0, output: 0 } },
+    ],
+  }
+
+  it('collects every entry the catalog bills as free', () => {
+    expect([...projectFreeModels(CATALOG)].sort())
+      .toEqual(['cohere/north-mini-code', 'nvidia/nemotron-3.5-lightning'])
+  })
+
+  it('does not read free out of a zero price', () => {
+    // A paid entry the catalog prices at zero is a catalog bug, and guessing
+    // "free" from it would dispatch a request with no means to pay. The paid
+    // path only asks for a key the deployment already configured, so it is the
+    // safe way to be wrong.
+    const free = projectFreeModels({
+      data: [{ id: 'x', categories: ['chat'], billing_mode: 'paid', pricing: { input: 0, output: 0 } }],
+    })
+    expect(free.has('x')).toBe(false)
+  })
+
+  it('treats an entry that says nothing about billing as paid', () => {
+    // Another OpenAI-compatible gateway behind a configured apiUrl may not
+    // carry billing_mode at all.
+    expect(projectFreeModels({ data: [{ id: 'private/model-a' }] }).size).toBe(0)
+  })
+
+  it('answers isFree from the same cached read the request already made', async () => {
+    let reads = 0
+    const catalog = new BlockrunCatalog('blockrun', 'https://example.invalid/v1')
+    // Stub the one network call this class makes; the point of the test is the
+    // sharing, not the transport.
+    const original = globalThis.fetch
+    globalThis.fetch = ((): Promise<Response> => {
+      reads += 1
+      return Promise.resolve(new Response(JSON.stringify(CATALOG), { headers: { 'content-type': 'application/json' } }))
+    }) as typeof fetch
+    try {
+      await catalog.list()
+      expect(await catalog.isFree('nvidia/nemotron-3.5-lightning')).toBe(true)
+      expect(await catalog.isFree('deepseek/deepseek-chat')).toBe(false)
+    } finally {
+      globalThis.fetch = original
+    }
+    expect(reads).toBe(1)
+  })
+
+  it('calls a model paid when the catalog cannot be read at all', async () => {
+    // The failure mode this avoids: a gateway blip makes every model look
+    // free, so requests go out with no wallet and `/spend` reports nothing.
+    // Both wrong answers here are silent; the paid default is not.
+    const catalog = new BlockrunCatalog('blockrun', 'http://127.0.0.1:1/v1')
+    expect(await catalog.isFree('nvidia/nemotron-3.5-lightning')).toBe(false)
   })
 })
