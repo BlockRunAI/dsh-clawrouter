@@ -208,8 +208,10 @@ DeepSeek serves no vision model, so this is capability rather than savings. Atta
 |---|---|
 | answered correctly | every tagged Anthropic, Google, Moonshot, xAI and Z.ai model; OpenAI's non-`pro` models plus `gpt-5.6-sol-pro`, `gpt-5.6-terra-pro` and now `gpt-5.6-luna-pro`; `deepseek/deepseek-v4-flash-vision-exp` and `xiaomi/mimo-v2.5` |
 | **refuses the image** — `INVALID_REQUEST` on all three | `openai/gpt-5.2-pro`, `gpt-5.4-pro`, `gpt-5.5-pro` |
-| answers that no image was sent | `nvidia/llama-3.2-11b-vision` |
+| answers that no image was sent, **because the gateway never sent it** | `nvidia/llama-3.2-11b-vision` |
 | **never measured — a different model answered** | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` (served by `nemotron-3-nano-30b`), `qwen/qwen3.8-flash` (served by `qwen3.7-flash`) |
+
+The `llama-3.2-11b-vision` row is not the model's fault: the gateway strips every image part on both its NVIDIA paths before dispatch, unconditionally, under a comment claiming NVIDIA models have no vision. Probed directly against NVIDIA, that model and `nemotron-3-nano-omni` both name the colour correctly. It stays out of the list because this list is what works *through* this gateway, but it is a gateway bug and it is being fixed.
 
 The last row is the one to understand before widening the list yourself. Those two are not failing; they are not being reached. `nemotron-3-nano-omni` passes on roughly half of probe runs and is answered by a model with no vision on the rest, so admitting it would buy an image path that works when the gateway's cascade feels like it — and when it does not, the reply is a confident wrong answer about an image that was never seen. `qwen3.8-flash` is a paid model substituted by a cheaper paid one, so this is not a free-tier quirk. Reported as BlockRunAI/blockrun#450.
 

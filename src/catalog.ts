@@ -96,11 +96,19 @@ const VISION_CATEGORY = 'vision'
  * The six left out fall into three kinds, and only the first is the model's
  * own fault:
  *
- * - **Refuses or ignores the image.** `openai/gpt-5.2-pro`, `gpt-5.4-pro` and
+ * - **Refuses the image.** `openai/gpt-5.2-pro`, `gpt-5.4-pro` and
  *   `gpt-5.5-pro` now fail `INVALID_REQUEST` on all three colours; until
  *   2026-08-30 they dropped the image and answered as if none was sent, which
  *   was billed, so failing loudly is an upstream improvement.
- *   `nvidia/llama-3.2-11b-vision` answers "you didn't provide an image".
+ * - **Never sent the image, by the gateway rather than the model.**
+ *   `nvidia/llama-3.2-11b-vision` answers "you didn't provide an image"
+ *   because that is true: the gateway strips every `image_url` part on both
+ *   NVIDIA paths before dispatch (`ai-providers.ts:910`, `ai-stream.ts:1933`),
+ *   unconditionally, under a comment asserting NVIDIA models have no vision.
+ *   They do — probed directly against NIM, both this model and
+ *   `nemotron-3-nano-omni` name the colour correctly. The entry still cannot
+ *   be listed here, because this list is what works THROUGH this gateway, but
+ *   the fault is ours to fix and not the vendor's.
  * - **Never actually measured, because a different model answered.**
  *   `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` and `qwen/qwen3.8-flash`
  *   were served by `nvidia/nemotron-3-nano-30b` and `qwen/qwen3.7-flash`

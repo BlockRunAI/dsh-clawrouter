@@ -4,6 +4,12 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## Unreleased
+
+### Changed
+- **`nvidia/llama-3.2-11b-vision` was written up as a model that cannot see; it is a gateway that never sends the image.** The gateway strips every `image_url` part on both its NVIDIA paths before dispatch — unconditionally, for every NVIDIA model, under a comment asserting that NVIDIA models have no vision. Probed directly against NVIDIA, that model and `nemotron-3-nano-omni` both name the colour correctly, so the comment is false and the entry's fluent "you didn't provide an image" is simply accurate. It stays out of `visionModels`, because this list is what works *through* this gateway and nothing here has changed for a caller — but the fault was mis-attributed to the vendor, and the streaming path drops the image with no log line at all, which is why it took a source read to see. Found with BlockRunAI/blockrun's own maintainers; fix is theirs.
+- **Filed BlockRunAI/blockrun#453** for the relayed-error-as-assistant-text shape noted under 0.10.5: a `200` whose `choices[0].message.content` is a stringified upstream error, structurally identical to a real answer. `src/translate.ts` already refuses it here; the issue asks for it at the gateway, since a client that has not implemented the check has no way to know.
+
 ## 0.10.5 — 2026-08-31
 
 ### Fixed

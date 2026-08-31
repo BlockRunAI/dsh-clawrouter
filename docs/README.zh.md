@@ -202,8 +202,10 @@ DeepSeek 没有任何视觉模型，所以这是**能力**，不是省钱。贴�
 |---|---|
 | 答对 | 所有带标签的 Anthropic、Google、Moonshot、xAI、Z.ai 模型；OpenAI 的非 `pro` 模型加 `gpt-5.6-sol-pro`、`gpt-5.6-terra-pro`，以及现在的 `gpt-5.6-luna-pro`；还有 `deepseek/deepseek-v4-flash-vision-exp` 和 `xiaomi/mimo-v2.5` |
 | **拒收图片**——三次全部 `INVALID_REQUEST` | `openai/gpt-5.2-pro`、`gpt-5.4-pro`、`gpt-5.5-pro` |
-| 回答说没收到图片 | `nvidia/llama-3.2-11b-vision` |
+| 回答说没收到图片，**因为网关根本没把图片发出去** | `nvidia/llama-3.2-11b-vision` |
 | **根本没测到——是别的模型在回答** | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`（由 `nemotron-3-nano-30b` 应答）、`qwen/qwen3.8-flash`（由 `qwen3.7-flash` 应答） |
+
+`llama-3.2-11b-vision` 那一行不是模型的问题：网关在发出请求之前，会在它的两条 NVIDIA 路径上**无条件**剥掉所有图片部分，而依据是一句「NVIDIA 模型没有视觉能力」的过时注释。直接对 NVIDIA 实测，这个模型和 `nemotron-3-nano-omni` 都能正确说出颜色。它仍然留在名单外，因为这份名单记录的是**穿过这条网关**之后还能用的东西——但这是网关的 bug，而且正在修。
 
 最后一行是你自己往名单里加东西之前最该看懂的。这两个不是「不行」，是**根本没被接通**。`nemotron-3-nano-omni` 大约一半的探测轮次能通过，另一半由一个完全没有视觉能力的模型应答——收录它等于换来一条「网关心情好才通」的图片通道，而它心情不好时，你拿到的是一段关于它从没看过的图片的、自信的错误答案。`qwen3.8-flash` 则是**付费模型被更便宜的付费模型顶替**，所以这不是免费层特有的毛病。已向上游反馈：BlockRunAI/blockrun#450。
 
