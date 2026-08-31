@@ -4,7 +4,7 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## Unreleased
+## 0.10.3 — 2026-08-30
 
 ### Fixed
 - **Not one of the free models was reachable, because the route asked for a wallet before it looked at what you named.** BlockRun rebuilt its free tier on 2026-08-30 — NVIDIA retired four of the five free models in a single sweep and seven now stand in their place — and the gateway serves every one of them with HTTP 200 and no `402` at all. This plugin resolved the wallet key as the first thing a request did, so a machine with no key exported failed with `MISSING_CREDENTIAL` before it could discover that the model needed no key. The credential is now resolved only for a model the catalog does not bill as `free`, which is what the "no accounts, no API keys, no credit card" line on the front of this README was supposed to mean. Verified against the live gateway with nothing exported: `nvidia/nemotron-3.5-lightning`, `cohere/north-mini-code` and `poolside/laguna-xs-2.1` all answered, and `deepseek/deepseek-chat` still failed with `MISSING_CREDENTIAL`. The exemption is read per model from the catalog, so a model repriced away from free starts requiring the key on the next catalog read — and if the catalog cannot be read at all, every model is treated as paid.
