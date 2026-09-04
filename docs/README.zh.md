@@ -6,7 +6,7 @@
 
 <p>DeepSeek 又快又便宜，主循环就该继续用它。<br><br>
 <strong>这个插件补的是它做不到的事：危险命令执行前，让更强的模型先审一遍。</strong><br><br>
-<em>一个钱包直调 <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个模型。不注册账号，不用 API Key，不用信用卡。</em></p>
+<em>一个 BlockRun API Key 或 x402 钱包直调 <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个模型。</em></p>
 
 <br>
 
@@ -31,7 +31,7 @@
 
 </div>
 
-> **dsh-clawrouter** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，把一个更强的模型放在智能体危险操作的前面。当智能体准备执行 `rm -rf ~`，审查模型会读一遍并给出放行 / 拒绝 / 交给你——由真实的工具执行器强制执行，而不是靠提示词劝阻。它同时注册一条 BlockRun provider 路由，让审查模型（以及全部 <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个模型）都能用一个钱包直接调用：不注册账号、不用 API Key，通过 [x402](https://x402.org) 用 USDC 按次付费。MIT 许可。
+> **dsh-clawrouter** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，把一个更强的模型放在智能体危险操作的前面。当智能体准备执行 `rm -rf ~`，审查模型会读一遍并给出放行 / 拒绝 / 交给你——由真实的工具执行器强制执行，而不是靠提示词劝阻。它同时注册一条 BlockRun provider 路由，让审查模型（以及全部 <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个模型）都能通过账号 API Key 或 x402 钱包调用。MIT 许可。
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -223,9 +223,9 @@ DeepSeek 没有任何视觉模型，所以这是**能力**，不是省钱。贴�
 
 但**完全不会推理的模型**是另一回事，会在**付款之前本地拒绝**：`openai/gpt-4o` 会先收钱再拒绝 `reasoning_effort`。catalog 里写明了哪些模型合格，所以这个判断不花钱。
 
-### 7. 一个钱包，<!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个模型
+### 7. 一个 API Key 或钱包，<!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个模型
 
-注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
+注册一条 `blockrun` provider 路由，支持两种计费方式：推荐使用 BlockRun 账号 API Key 和预付额度；原有钱包方式继续通过 x402 用 USDC 按次结算。
 
 这一点在 DeepSeek 覆盖不到的模型上最有价值——Claude、GPT、Gemini、Grok，而这恰恰是「审查」需要的。
 
@@ -235,20 +235,26 @@ DeepSeek 没有任何视觉模型，所以这是**能力**，不是省钱。贴�
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
-export BASE_CHAIN_WALLET_KEY=0x...   # 也可以存进 credentials 服务
+export BLOCKRUN_API_KEY=brk_...   # 也可以存进 credentials 服务
 ```
+
+先在 [user.blockrun.ai](https://user.blockrun.ai) 注册，再到 [Keys 页面](https://user.blockrun.ai/dashboard/keys) 创建 API Key，并在 [Credits 页面](https://user.blockrun.ai/dashboard/credits) 充值。OpenAI 兼容 API Base 是 `https://api.blockrun.ai/v1`。
 
 **安装时会打印六条 `✕ missing peer`，这是正常的。** 这些包由 harness 在运行时提供，所有第一方 bundle 也都是这么声明 peer 的——反过来直接依赖它们，会让 profile 里出现第二份 cordis，那种坏法要难查得多。已在全新环境实测：profile 正常组装，`dsh --profile web --dump-config` 能列出两行配置。什么都不缺。
 
-**这个 key 从哪来？** 没有 API key 可粘贴——认证方式就是钱包签名。
+**这个 key 从哪来？** 可以选择账号计费或钱包结算：
+
+- **账号 API Key（推荐）：** 在 [user.blockrun.ai](https://user.blockrun.ai) 注册，在 [Keys 页面](https://user.blockrun.ai/dashboard/keys) 创建后导出为 `BLOCKRUN_API_KEY`。
+- **Solana x402：** 需要链上结算时优先使用支持 Solana 的 BlockRun 客户端；本适配器的钱包回退当前使用 EVM 签名，因此在这里请配置账号 API Key。
+- **Base x402：** 把现有 EVM 钱包私钥导出为 `BASE_CHAIN_WALLET_KEY`。
 
 - **用过 BlockRun 的其他工具？** 那你已经有钱包了。SDK 存在 `~/.blockrun/.session`，ClawRouter 存在 `~/.openclaw/blockrun/wallet.key`。哪个存在就导出哪个：`export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
 - **还没有钱包？** `npx -y @blockrun/clawrouter` 会生成一个并打印地址。记下地址后停掉它，往这个地址转几美元 USDC（Base 链），然后导出私钥。
 - **只想先试试？** catalog 里标记为 `free` 的那 <!-- br:models.free -->7<!-- /br:models.free --> 个模型完全不需要钱包。网关对它们返回 `200`、从不发起 x402 握手，所以 `dsh-clawrouter` 在发送之前不会去要密钥。选 `nvidia/nemotron-3.5-lightning` 或 `cohere/north-mini-code`，什么都不导出就能跑通。其余所有模型在你设置密钥之前仍然会以 `MISSING_CREDENTIAL` 失败——这个豁免是**按模型**判定的、从 catalog 读出来的，不是整体放宽。
 
-本插件**不会自己去读**这两个文件。一个「用户没配置过、却悄悄盖住了他真正配置的那个」的凭据，正是 harness 凭据机制要防的事——所以它只读你指定的那个引用。
+本插件**不会自己去读**钱包文件。它每次操作都会重新解析凭据引用，因此轮换密钥无需重启。两者都配置时优先使用账号 API Key；API Key 格式错误会立即失败，不会静默改用钱包。
 
-Base 链上 5 美元的 USDC，够跑约 **2,500** 次闸门审查（它们都落在 $0.002 的下限上）——也只够约 **5** 次带 10 万 token 上下文的 Opus 调用。同样是 5 美元；请按你**实际打算怎么用**这条路由来充值，而不是按它的下限。配置里写的是**引用**（`walletKeyEnv`）而不是密钥本身，并且每次请求实时解析——换密钥下一次调用即生效，任何密钥都不会进入配置文件。
+账号模式请以 [Credits 页面](https://user.blockrun.ai/dashboard/credits) 为准。Base 链上 5 美元的 USDC，够跑约 **2,500** 次闸门审查——也只够约 **5** 次带 10 万 token 上下文的 Opus 调用。配置里写的是**引用**（`apiKeyEnv` 和 `walletKeyEnv`）而不是密钥本身，任何密钥都不会进入配置文件。
 
 ## 配置项
 
@@ -257,8 +263,10 @@ Base 链上 5 美元的 USDC，够跑约 **2,500** 次闸门审查（它们都�
 | 配置 | 默认值 | 含义 |
 |---|---|---|
 | `provider` | `blockrun` | 注册的路由名 |
+| `apiKeyEnv` | `BLOCKRUN_API_KEY` | 账号 API Key 的凭据引用；优先使用 |
+| `accountApiUrl` | `https://api.blockrun.ai` | 账号 API 根地址 |
 | `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | 存放 EVM 钱包私钥的凭据**引用** |
-| `apiUrl` | `https://blockrun.ai/api` | API 根地址 |
+| `apiUrl` | `https://blockrun.ai/api` | x402 钱包 API 根地址 |
 | `timeoutMs` | `300000` | 单次请求超时 |
 | `auxiliaryModel` | *(关闭)* | Harness 自身维护调用所用的模型——见下 |
 | `requestFeeUsd` | `0.002` | 每次请求的固定费用，`/spend` 会用到——取网关实际报价，见下 |
@@ -303,7 +311,7 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 
 - **只有实测不接受图片的模型才会拒绝图片**——`visionModels` 是真正对着一张图答对了的集合，光有 `vision` 标签不够：有好几个带标签的模型会先收钱再失败。目前排除 6 个，见第 5 节。（这一条以前写的是「图片会被明确拒绝，视觉能力在计划中」，旁边还有一条说推理档位同样被拒绝。两个能力都在 0.10.0 就发布了，而这两条说明又活了三个版本——而且恰恰活在读者专门用来查「什么不能用」的那一节里。）
 - **中断请求会立刻停止投递，但底层 HTTP 请求本身还取消不了**——要等 `@blockrun/llm` 支持 `AbortSignal`，目前连接会在 SDK 自己的超时后关闭。
-- **本插件不记录自己花了多少钱。** Harness 的会话日志会拒绝它不认识的事件类型，而仓库外的插件无法把自己的事件标记为可忽略，所以它不写任何会话事件。它也不会写进 `~/.blockrun/cost_log.jsonl`：那个账本是 `@blockrun/llm` 的 `LLMClient` 写的，而本适配器用的流式客户端只在内存里累计。目前请直接看钱包余额——这条说明的早先版本指向了那个账本，那会让你看到的是**其他工具**的花费，而不是本插件的。
+- **本插件的 `/spend` 只是进程内估算。** 账号余额和用量请看 [BlockRun Dashboard](https://user.blockrun.ai/dashboard)，x402 结算请看钱包；适配器不会持久化账单。
 - **智能路由（`blockrun/auto`）尚未接入**，缺的不是路由器。虚拟模型必须报告**一个**上下文窗口，而 Harness 用它来决定何时压缩：报最大的，某一轮路由到小模型时会直接溢出且压缩永不触发；报最小的，所有会话都会过早压缩。在这个问题有诚实答案之前，请直接指定模型 id —— `auxiliaryModel` 已经把真正花钱的维护调用挪走了，省钱的部分本来就在那里。
 - **压缩可能比需要的时机更早触发。** 本路由报告的是网关模型目录里声明的上下文窗口。对着真实网关实测：`openai/gpt-4.1-nano` 接受了 **450,037** token 的输入，并正确复述了第一行的标记——没有截断，但这是目录声明的 128,000 的 3.5 倍。Harness 是按声明值来决定何时压缩的，所以会话可能在模型其实还吃得下的时候就压缩了。已向上游反馈；本插件如实报告目录的值而不是往高了猜——猜高了就是拿「提前压缩」换「静默溢出」。
 - **上下文溢出是靠请求大小判定的，不是靠错误文案。** 真实溢出从网关返回的是 `{"message":"API request failed"}`——厂商原始文案被清洗掉了，常规的文本检测器什么都匹配不到。所以在收到 400 之后，如果请求本身已经超过该模型声明的窗口，就按溢出处理，好让压缩能够恢复。文本检测器仍然优先，所以网关哪天不再清洗，这里会自动回到正轨。

@@ -2,8 +2,8 @@ import { defineConfig } from 'vitest/config'
 
 /**
  * Live-gateway tests, kept out of the default `vitest run` on purpose: they
- * spend real USDC. Run them deliberately with `npm run test:e2e`; they
- * self-skip when no wallet is available.
+ * may spend credits or real USDC. Run them deliberately with
+ * `npm run test:e2e`; each billing-mode group self-skips without its key.
  */
 export default defineConfig({
   test: {

@@ -37,11 +37,13 @@ function noWallet(): Promise<string> {
 
 /** Every chat request body the server received, in order. */
 let bodies: Record<string, unknown>[] = []
+let authorizations: Array<string | undefined> = []
 let server: ReturnType<typeof createServer> | undefined
 let apiUrl = ''
 
 beforeEach(async () => {
   bodies = []
+  authorizations = []
   server = createServer((req, res) => {
     if (req.url?.endsWith('/models') === true) {
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -51,6 +53,7 @@ beforeEach(async () => {
     const chunks: Buffer[] = []
     req.on('data', chunk => chunks.push(chunk as Buffer))
     req.on('end', () => {
+      authorizations.push(req.headers.authorization)
       bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' } }] })}\n\n`)
@@ -64,7 +67,11 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await new Promise<void>(resolve => server?.close(() => resolve()))
+  await new Promise<void>(resolve => {
+    server?.close(() => resolve())
+    server?.closeIdleConnections()
+    server?.closeAllConnections()
+  })
   server = undefined
 })
 
@@ -73,11 +80,13 @@ function adapter(
   auxiliaryModel?: string,
   meter?: SpendMeter,
   resolveWalletKey: () => Promise<string> = () => Promise.resolve(DUMMY_KEY),
+  resolveApiKey?: () => Promise<string | undefined>,
 ): BlockrunAdapter {
   return new BlockrunAdapter({
     provider: 'blockrun',
-    connection: () => ({ apiUrl, timeoutMs: 10_000, ...auxiliaryModel === undefined ? {} : { auxiliaryModel } }),
+    connection: () => ({ apiUrl, accountApiUrl: apiUrl, timeoutMs: 10_000, ...auxiliaryModel === undefined ? {} : { auxiliaryModel } }),
     resolveWalletKey,
+    ...resolveApiKey === undefined ? {} : { resolveApiKey },
     catalog: new BlockrunCatalog('blockrun', `${apiUrl}/v1`),
     ...meter === undefined ? {} : { meter },
   })
@@ -98,6 +107,18 @@ async function run(instance: BlockrunAdapter, extra: Partial<GenerateOptions> = 
 }
 
 describe('what reaches the wire', () => {
+  it('uses one Bearer-authenticated account request without consulting a wallet', async () => {
+    let walletReads = 0
+    const instance = adapter(undefined, undefined, () => {
+      walletReads += 1
+      return Promise.resolve(DUMMY_KEY)
+    }, () => Promise.resolve('brk_test_account_key'))
+    await run(instance)
+    expect(walletReads).toBe(0)
+    expect(bodies).toHaveLength(1)
+    expect(authorizations).toEqual(['Bearer brk_test_account_key'])
+  })
+
   it('streams a plain request end to end over real HTTP', async () => {
     const chunks = await run(adapter())
     expect(bodies).toHaveLength(1)

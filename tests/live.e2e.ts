@@ -1,7 +1,5 @@
-// Live end-to-end against the real BlockRun gateway. These are the only tests
-// that exercise the x402 handshake — 402 -> sign EIP-3009 locally -> retry ->
-// settle — which no mock can stand in for, because the signature is the
-// authentication.
+// Live end-to-end against the real BlockRun gateways. This covers account API
+// key streaming as well as the x402 handshake, which no mock can fully prove.
 //
 // Real USDC is spent (a fraction of a cent per run). Self-skips when no wallet
 // is available, so `vitest run` on a machine without one is still green.
@@ -20,6 +18,7 @@ import { BlockrunCatalog, projectCatalog, projectFreeModels } from '../src/catal
 import { buildReviewPrompt, matchRisk, parseVerdict, REVIEW_SYSTEM_PROMPT } from '../src/reviewer.ts'
 
 const API_URL = 'https://blockrun.ai/api'
+const ACCOUNT_API_URL = 'https://api.blockrun.ai'
 
 /**
  * The wallet key, from the environment or the local BlockRun session file.
@@ -46,6 +45,8 @@ function walletKey(): string | undefined {
 
 const KEY = walletKey()
 const live = KEY === undefined ? describe.skip : describe
+const ACCOUNT_KEY = process.env['BLOCKRUN_API_KEY']?.trim()
+const accountLive = ACCOUNT_KEY === undefined || ACCOUNT_KEY.length === 0 ? describe.skip : describe
 
 /** An adapter wired to the real gateway. */
 function adapter(): BlockrunAdapter {
@@ -57,6 +58,17 @@ function adapter(): BlockrunAdapter {
     // Stands in for the attachment service: these tests exercise the wire
     // format, not the harness's attachment storage.
     resolveImage: async () => `data:image/png;base64,${RED_8x8}`,
+  })
+}
+
+/** An adapter using account credit billing and no wallet resolver. */
+function accountAdapter(): BlockrunAdapter {
+  return new BlockrunAdapter({
+    provider: 'blockrun',
+    connection: () => ({ apiUrl: API_URL, accountApiUrl: ACCOUNT_API_URL, timeoutMs: 120_000 }),
+    resolveApiKey: () => Promise.resolve(ACCOUNT_KEY!),
+    resolveWalletKey: () => Promise.reject(new Error('wallet resolver ran in account mode')),
+    catalog: new BlockrunCatalog('blockrun', `${ACCOUNT_API_URL}/v1`),
   })
 }
 
@@ -82,6 +94,19 @@ async function collect(model: string, text: string, maxTokens = 64, system?: str
 function textOf(chunks: readonly StreamChunk[]): string {
   return chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.text).join('')
 }
+
+accountLive('live account API', () => {
+  it('streams with an API key without consulting a wallet', async () => {
+    const chunks: StreamChunk[] = []
+    for await (const chunk of accountAdapter().stream({
+      provider: 'blockrun',
+      model: 'openai/gpt-4.1-nano',
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'Reply with exactly: DSH_API_OK' }], source: { kind: 'user' } })],
+    })) chunks.push(chunk)
+    expect(textOf(chunks)).toContain('DSH_API_OK')
+    expect(chunks.at(-1)?.type).toBe('finish')
+  }, 180_000)
+})
 
 live('live gateway (spends real USDC)', () => {
   it('completes a paid request through the x402 handshake', async () => {

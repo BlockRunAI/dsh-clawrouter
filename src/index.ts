@@ -16,6 +16,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from './adapter.ts'
@@ -39,6 +40,9 @@ export type { BlockrunCatalogModel, BlockrunStreamChunk, ReviewVerdict, RiskMatc
 
 /** BlockRun's public API root. */
 export const DEFAULT_API_URL = 'https://blockrun.ai/api'
+
+/** BlockRun account API root. */
+export const DEFAULT_ACCOUNT_API_URL = 'https://api.blockrun.ai'
 
 /** Harness route key this plugin registers by default. */
 export const DEFAULT_PROVIDER = 'blockrun'
@@ -74,8 +78,12 @@ export interface Config {
    * that holds the EVM wallet key. The value never appears in configuration.
    */
   walletKeyEnv?: string
+  /** Credential reference holding a BlockRun account API key. */
+  apiKeyEnv?: string
   /** API root; point at the Solana gateway or a private deployment. */
   apiUrl?: string
+  /** Account API root. */
+  accountApiUrl?: string
   /**
    * Models this route may send images to.
    *
@@ -117,7 +125,9 @@ export interface Config {
 export const Config: z<Config> = z.object({
   provider: z.string().default(DEFAULT_PROVIDER),
   walletKeyEnv: z.string().role('credential-ref').default('BASE_CHAIN_WALLET_KEY'),
+  apiKeyEnv: z.string().role('credential-ref').default('BLOCKRUN_API_KEY'),
   apiUrl: z.string().default(DEFAULT_API_URL),
+  accountApiUrl: z.string().default(DEFAULT_ACCOUNT_API_URL),
   timeoutMs: z.natural().default(DEFAULT_TIMEOUT_MS),
   requestFeeUsd: z.number().min(0).default(DEFAULT_REQUEST_FEE_USD),
   auxiliaryModel: z.string(),
@@ -133,7 +143,9 @@ export const Config: z<Config> = z.object({
 export function apply(ctx: Context, config: Config): void {
   const provider = nonEmpty(config.provider, DEFAULT_PROVIDER)
   const apiUrl = nonEmpty(config.apiUrl, DEFAULT_API_URL).replace(/\/$/, '')
-  const ref = credentialRef(nonEmpty(config.walletKeyEnv, 'BASE_CHAIN_WALLET_KEY'))
+  const accountApiUrl = nonEmpty(config.accountApiUrl, DEFAULT_ACCOUNT_API_URL).replace(/\/$/, '')
+  const walletRef = credentialRef(nonEmpty(config.walletKeyEnv, 'BASE_CHAIN_WALLET_KEY'))
+  const apiRef = credentialRef(nonEmpty(config.apiKeyEnv, 'BLOCKRUN_API_KEY'))
   const timeoutMs = config.timeoutMs !== undefined && config.timeoutMs > 0 ? config.timeoutMs : DEFAULT_TIMEOUT_MS
 
   const auxiliaryModel = config.auxiliaryModel !== undefined && config.auxiliaryModel.length > 0
@@ -141,23 +153,37 @@ export function apply(ctx: Context, config: Config): void {
     : undefined
   const connection = (): BlockrunConnection => ({
     apiUrl,
+    accountApiUrl,
     timeoutMs,
     ...auxiliaryModel === undefined ? {} : { auxiliaryModel },
   })
 
   // Resolved per operation, never cached: a wallet key rotated in the managed
   // store must reach the very next request without reloading this plugin.
-  const resolveWalletKey = async (): Promise<string> => {
+  const resolveCredential = async (ref: CredentialRef): Promise<string | undefined> => {
     const credentials = ctx.get('credentials')
     if (credentials !== undefined) {
       const hit = await credentials.resolve(ref)
-      if (hit !== undefined) return assertUsableWalletKey(hit.value, ref)
+      if (hit !== undefined) return hit.value
     } else {
       // Without the seam there is no managed store to rank against, so the
       // launching environment is the whole credential plane.
       const ambient = launchEnvironmentOf(ctx).get(ref)
-      if (ambient !== undefined && ambient.value.length > 0) return assertUsableWalletKey(ambient.value, ref)
+      if (ambient !== undefined && ambient.value.length > 0) return ambient.value
     }
+    return undefined
+  }
+
+  // Account credentials take priority and are resolved for every operation so
+  // managed-key rotation is effective without reloading the plugin.
+  const resolveApiKey = async (): Promise<string | undefined> => {
+    const value = await resolveCredential(apiRef)
+    return value === undefined ? undefined : assertUsableApiKey(value, apiRef)
+  }
+
+  const resolveWalletKey = async (): Promise<string> => {
+    const value = await resolveCredential(walletRef)
+    if (value !== undefined) return assertUsableWalletKey(value, walletRef)
     // The diagnostic answers "what do I do now" in the two states a reader is
     // actually in. Someone already running a BlockRun tool has a funded wallet
     // on disk and no idea this route cannot see it; someone new has never held
@@ -171,15 +197,15 @@ export function apply(ctx: Context, config: Config): void {
     // quietly shadowing the one they did, is the confusion the credentials
     // seam exists to prevent.
     throw new LlmError(
-      `dsh-clawrouter: no wallet key for provider route "${provider}".`
-      + ' BlockRun authenticates with a wallet signature — there is no API key to paste.\n'
+      `dsh-clawrouter: no BlockRun API key or wallet key for provider route "${provider}".\n`
+      + `  Recommended: create an API key at https://user.blockrun.ai/dashboard/keys and set ${apiRef}.\n`
       + '  Want to try the route first? The models the catalog bills as `free` need no wallet at all\n'
       + '  and are reachable right now; this failure is only for the ones that charge.\n'
       + '  Have a BlockRun wallet already? Look in ~/.blockrun/.session or ~/.openclaw/blockrun/wallet.key:\n'
-      + `      export ${ref}=$(cat ~/.blockrun/.session)\n`
+      + `      export ${walletRef}=$(cat ~/.blockrun/.session)\n`
       + '  No wallet yet? `npx -y @blockrun/clawrouter` generates one and prints its address;\n'
       + '  stop it once you have noted the address, send it a few USDC on Base, then export the key.\n'
-      + `  ${ref} can also be stored through the credentials service instead of the environment.`,
+      + `  ${apiRef} and ${walletRef} can also be stored through the credentials service.`,
       'MISSING_CREDENTIAL',
     )
   }
@@ -206,7 +232,7 @@ export function apply(ctx: Context, config: Config): void {
     return `data:${ref.mediaType};base64,${Buffer.from(stored.data).toString("base64")}`
   }
 
-  const adapter = new BlockrunAdapter({ provider, connection, resolveWalletKey, catalog, meter, resolveImage })
+  const adapter = new BlockrunAdapter({ provider, connection, resolveApiKey, resolveWalletKey, catalog, meter, resolveImage })
 
   // Optional child fiber: a composition with no command surface still routes
   // requests; it just has nowhere to print this.
@@ -229,6 +255,18 @@ function assertUsableWalletKey(value: string, ref: string): string {
   if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
     throw new LlmError(
       `dsh-clawrouter: ${ref} is not a usable EVM private key (expected 0x followed by 64 hex characters)`,
+      'INVALID_CREDENTIAL',
+    )
+  }
+  return key
+}
+
+/** A BlockRun account API key, checked without ever logging its value. */
+function assertUsableApiKey(value: string, ref: string): string {
+  const key = value.trim()
+  if (!/^brk_[A-Za-z0-9_-]+$/.test(key)) {
+    throw new LlmError(
+      `dsh-clawrouter: ${ref} is not a usable BlockRun API key; create one at https://user.blockrun.ai/dashboard/keys`,
       'INVALID_CREDENTIAL',
     )
   }

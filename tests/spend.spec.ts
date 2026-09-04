@@ -64,7 +64,7 @@ describe('SpendMeter', () => {
     meter.record('deepseek/deepseek-chat', usage(14, 1))
     const text = renderSpend(meter.summary())
     expect(text).toMatch(/Quoted from the request/)
-    expect(text).toMatch(/wallet balance is the authority/)
+    expect(text).toMatch(/account dashboard or wallet balance is the authority/)
     // Small amounts stay legible rather than rounding to $0.00.
     expect(text).not.toMatch(/\$0\.00\b/)
   })
@@ -108,7 +108,7 @@ describe('the floor stops being honest as context grows', () => {
     meter.record('deepseek/deepseek-chat', usage(17, 3))
     const text = renderSpend(meter.summary())
     expect(text).not.toMatch(/FLOOR AND LIKELY WELL UNDER/)
-    expect(text).toMatch(/wallet balance is the authority/)
+    expect(text).toMatch(/account dashboard or wallet balance is the authority/)
   })
 
   it('warns on the average, not on one big call among many', () => {

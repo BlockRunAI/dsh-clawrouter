@@ -6,13 +6,13 @@
 
 <p>DeepSeek is fast and cheap — keep it for the loop.<br><br>
 <strong>This adds what it cannot do: a stronger model reviews the dangerous command before it runs.</strong><br><br>
-<em><!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models from one wallet. No accounts. No API keys. No credit card.</em></p>
+<em><!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models with one BlockRun API key or an x402 wallet.</em></p>
 
 <br>
 
 <img src="https://img.shields.io/badge/🛡️_Review_Before_Execute-success?style=for-the-badge" alt="Review before execute">&nbsp;
 <img src="https://img.shields.io/badge/🧠_Claude_Reviews_DeepSeek-black?style=for-the-badge" alt="Claude reviews DeepSeek">&nbsp;
-<img src="https://img.shields.io/badge/🔑_Zero_API_Keys-blue?style=for-the-badge" alt="No API keys">&nbsp;
+<img src="https://img.shields.io/badge/🔑_Account_API_Keys-blue?style=for-the-badge" alt="Account API keys">&nbsp;
 <img src="https://img.shields.io/badge/💰_x402_USDC-purple?style=for-the-badge" alt="x402 USDC">
 
 [![npm version](https://img.shields.io/npm/v/dsh-clawrouter.svg?style=flat-square&color=cb3837)](https://npmjs.com/package/dsh-clawrouter)
@@ -31,7 +31,7 @@ English | [中文](https://github.com/BlockRunAI/dsh-clawrouter/blob/main/docs/R
 
 </div>
 
-> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models) is reachable from one wallet with no accounts and no API keys, paid per request in USDC over [x402](https://x402.org). MIT licensed.
+> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models) is reachable with an account API key or a wallet paid per request in USDC over [x402](https://x402.org). MIT licensed.
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -155,7 +155,7 @@ Two things follow, and the second one costs real money.
 | `google/gemini-3.5-flash` | $0.002 | $0.066 | $0.325 |
 | `anthropic/claude-opus-5` | $0.002 | $0.217 | **$1.081** |
 
-Everything starts at the same floor and then diverges by more than thirty-fold. A coding agent holding a 100K-token context pays roughly fifteen times the floor per call on DeepSeek — and five hundred times on Opus. `/spend` says so whenever your average call carries a large context, and points you at your own model's rate rather than one number. It is also blind to a request that failed after paying. Your wallet balance is the authority.
+Everything starts at the same floor and then diverges by more than thirty-fold. A coding agent holding a 100K-token context pays roughly fifteen times the floor per call on DeepSeek — and five hundred times on Opus. `/spend` says so whenever your average call carries a large context, and points you at your own model's rate rather than one number. It is also blind to a request that failed after paying. The account dashboard or wallet balance is the authority.
 
 **A free model is $0, and `/spend` says so.** The <!-- br:models.free -->7<!-- /br:models.free --> models the catalog bills as `free` never reach the x402 handshake — the gateway answers them with `200` and no `402`, so no quote is signed and nothing settles. Their rows read `$0  N calls  (free tier — no payment was signed)`, and the large-context warning below is computed from the paid calls alone, since a call that was never quoted cannot be under-quoted. Before 0.10.3 every call was charged the flat request price regardless, so a session spent trying the free tier reported a cost that was entirely invented.
 
@@ -229,9 +229,9 @@ Reasoning models get `high` and `max`, declared per model from the catalog's `re
 
 Asking a model that does not reason at all is a different case, and is refused **locally, before paying**: `openai/gpt-4o` charges and then rejects `reasoning_effort` outright. The catalog says which models qualify, so that costs nothing to discover.
 
-### 7. <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models from one wallet
+### 7. <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models from one API key or wallet
 
-Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account.
+Registers a `blockrun` provider route with two billing modes. The recommended path uses a BlockRun account API key and prepaid credits. The existing wallet path remains available for per-request USDC settlement over x402.
 
 That matters most for models DeepSeek does not serve — Claude, GPT, Gemini, Grok — which is exactly what a reviewer needs.
 
@@ -241,20 +241,26 @@ That matters most for models DeepSeek does not serve — Claude, GPT, Gemini, Gr
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
-export BASE_CHAIN_WALLET_KEY=0x...   # or store it via the credentials service
+export BLOCKRUN_API_KEY=brk_...   # or store the reference via the credentials service
 ```
+
+[Create an account](https://user.blockrun.ai), then [create an API key](https://user.blockrun.ai/dashboard/keys) and [add credits](https://user.blockrun.ai/dashboard/credits). The OpenAI-compatible API base is `https://api.blockrun.ai/v1`.
 
 **The install prints `✕ missing peer` for six harness packages. That is expected.** The harness itself supplies them at runtime, and every first-party bundle declares its peers the same way — the alternative, depending on them directly, gives the profile a second copy of cordis and breaks the plugin in ways that are much harder to read. Verified on a clean install: the profile composes and `dsh --profile web --dump-config` lists both rows. Nothing is missing.
 
-**Where does the key come from?** There is no API key to paste — authentication is a wallet signature.
+**Where does the key come from?** Choose either account billing or wallet settlement:
 
-- **Already run a BlockRun tool?** You have a wallet already. The SDK keeps it at `~/.blockrun/.session`, ClawRouter at `~/.openclaw/blockrun/wallet.key`. Export whichever exists: `export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
-- **No wallet yet?** `npx -y @blockrun/clawrouter` generates one and prints its address. Stop it once you have the address, send it a few USDC on Base, then export the key.
+- **Account API key (recommended):** register at [user.blockrun.ai](https://user.blockrun.ai), create a key in the [Keys dashboard](https://user.blockrun.ai/dashboard/keys), and export it as `BLOCKRUN_API_KEY`.
+- **Solana x402:** use a Solana-capable BlockRun client when you want chain-native settlement with Solana USDC. This adapter's wallet fallback currently uses the EVM signer, so configure an account key here.
+- **Base x402:** export an existing EVM wallet key as `BASE_CHAIN_WALLET_KEY`.
+
+- **Already run a BlockRun wallet tool?** The SDK keeps its EVM wallet at `~/.blockrun/.session`, and ClawRouter at `~/.openclaw/blockrun/wallet.key`. Export whichever exists: `export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
+- **No wallet yet?** Account mode does not require one. For Base x402, `npx -y @blockrun/clawrouter` can generate a wallet.
 - **Just want to try it?** The <!-- br:models.free -->7<!-- /br:models.free --> models the catalog bills as `free` need no wallet at all. The gateway answers them with `200` and never opens the x402 handshake, so `dsh-clawrouter` does not ask for a key before sending one. Pick `nvidia/nemotron-3.5-lightning` or `cohere/north-mini-code` and it works with nothing exported. Every other model still fails with `MISSING_CREDENTIAL` until you set the key — the exemption is per model, read from the catalog, not a general loosening.
 
-This plugin reads neither file on its own. A credential nobody configured, quietly shadowing the one they did, is exactly what the harness credentials seam exists to prevent — so it only ever reads the reference you name.
+This plugin reads neither wallet file on its own. It resolves the credential references on every operation, so rotated account or wallet credentials take effect without reloading the plugin. When both are configured, the account API key wins. A malformed account key fails immediately instead of charging the wallet.
 
-$5 of USDC on Base covers about **2,500** gate reviews, which run at the $0.002 floor — and about **5** calls carrying a 100K-token context on Opus. Both figures are the same $5; fund for the way you intend to use the route rather than for its floor. The key is a **reference** in configuration (`walletKeyEnv`), resolved per request — rotating it takes effect on the very next call, and no secret enters a config file.
+For account mode, the [Credits dashboard](https://user.blockrun.ai/dashboard/credits) is the authority for funding and usage. For wallet mode, $5 of USDC on Base covers about **2,500** gate reviews at the $0.002 floor — and about **5** calls carrying a 100K-token context on Opus. Credentials are references (`apiKeyEnv` and `walletKeyEnv`), so no secret enters a config file.
 
 ## Configuration
 
@@ -263,8 +269,10 @@ $5 of USDC on Base covers about **2,500** gate reviews, which run at the $0.002 
 | Key | Default | Meaning |
 |---|---|---|
 | `provider` | `blockrun` | harness route key to register |
+| `apiKeyEnv` | `BLOCKRUN_API_KEY` | credential reference holding the account API key; takes priority |
+| `accountApiUrl` | `https://api.blockrun.ai` | account API root |
 | `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | credential *reference* holding the EVM wallet key |
-| `apiUrl` | `https://blockrun.ai/api` | API root |
+| `apiUrl` | `https://blockrun.ai/api` | x402 wallet API root |
 | `timeoutMs` | `300000` | per-request timeout |
 | `auxiliaryModel` | *(off)* | model for the harness's own maintenance calls — see below |
 | `requestFeeUsd` | `0.002` | flat per-request fee, used by `/spend` — the quoted figure, see below |
@@ -309,7 +317,7 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 
 - **An image is refused for a model measured not to accept one** — `visionModels` is the set that answered a real image correctly, and the `vision` tag alone is not enough, since several tagged models charge and then fail. Six are excluded; see section 5. (This bullet used to read "images are refused, vision is planned", beside another saying reasoning effort was refused too. Both shipped in 0.10.0 and both bullets outlived them by three releases, describing a plugin that no longer exists — in the section a reader consults precisely to find out what does not work.)
 - **An aborted request stops delivery immediately, but the in-flight HTTP request is not itself cancelled** until `@blockrun/llm` accepts an `AbortSignal`; the socket closes on the SDK's own timeout.
-- **This plugin does not record what it spends.** Harness session logs refuse event types a build does not know, and an out-of-repo plugin cannot mark its events ignorable, so it writes no session events. It also does not reach `~/.blockrun/cost_log.jsonl`: that ledger is written by `@blockrun/llm`'s `LLMClient`, and the streaming client this adapter uses tracks its spend in memory only. Check the wallet itself for now — an earlier version of this note pointed at the ledger, which would have shown you other tools' spending rather than this one's.
+- **This plugin's `/spend` command is an in-process estimate.** Account balance and usage live in the [BlockRun dashboard](https://user.blockrun.ai/dashboard); x402 settlements live in the wallet. The adapter does not persist a billing ledger.
 - **Smart routing (`blockrun/auto`) is not wired up**, and not for lack of a router. A virtual model has to report one context window, and the harness sizes compaction from it: report the largest candidate and a turn routed to a smaller model overflows with compaction never firing; report the smallest and every session compacts far too early. Until that has an honest answer, pin a model id — `auxiliaryModel` already moves the expensive maintenance calls, which is where the savings actually were.
 - **Compaction may fire earlier than it needs to.** This route reports the context window the gateway's model catalog declares. Measured against the live gateway, `openai/gpt-4.1-nano` accepted a 450,037-token prompt and recalled a marker from the very first line — no truncation, but 3.5x the 128,000 the catalog states. The harness sizes compaction from the declared figure, so a session can compact while the model would still have taken the whole thing. Reported upstream; this plugin reports what the catalog says rather than guessing higher, because over-claiming would trade early compaction for silent overflow.
 - **Context overflow is detected by request size, not by the error text.** A real overflow comes back from the gateway as `{"message":"API request failed"}` — the provider's wording is sanitized away, so the usual text detectors match nothing. After a 400, a request larger than the model's declared window is therefore treated as an overflow so compaction can recover. The text detectors still run first, so this corrects itself if the gateway stops sanitizing.

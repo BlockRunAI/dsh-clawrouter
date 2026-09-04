@@ -1,6 +1,6 @@
 /**
- * The BlockRun `LlmAdapter`: one harness provider route whose authentication is
- * a wallet signature rather than an API key.
+ * The BlockRun `LlmAdapter`: one harness provider route supporting account API
+ * keys as well as wallet-signed x402 settlement.
  *
  * Almost every request is paid per call in USDC over x402 — the gateway answers
  * an unpaid request with `402`, the client signs an EIP-3009 authorization
@@ -70,6 +70,8 @@ const CHAT_PATH = '/v1/chat/completions'
 export interface BlockrunConnection {
   /** API root, e.g. `https://blockrun.ai/api`. */
   apiUrl: string
+  /** Account API root, e.g. `https://api.blockrun.ai`. */
+  accountApiUrl?: string
   /** Per-request SDK timeout in milliseconds. */
   timeoutMs: number
   /**
@@ -88,6 +90,8 @@ export interface BlockrunAdapterOptions {
   connection: () => BlockrunConnection
   /** Resolves the wallet key, or throws `LlmError('MISSING_CREDENTIAL')`. */
   resolveWalletKey: () => Promise<string>
+  /** Resolves an account API key. Undefined selects wallet or free-tier auth. */
+  resolveApiKey?: () => Promise<string | undefined>
   /** Model catalog for this route. */
   catalog: BlockrunCatalog
   /** Counts what completed calls cost; omitted leaves spend uncounted. */
@@ -191,7 +195,12 @@ export class BlockrunAdapter extends LlmAdapter {
     // The catalog read this needs is not an extra one; `#assertServable` above
     // has already made it, and answers from the same cache.
     const free = await this.#options.catalog.isFree(model, options.signal)
-    const privateKey = free ? freeTierKey() : await this.#options.resolveWalletKey()
+    // An explicitly configured account key wins. It is never silently ignored
+    // in favour of a wallet, so a typo cannot charge a different billing plane.
+    const apiKey = await this.#options.resolveApiKey?.()
+    const privateKey = apiKey === undefined
+      ? free ? freeTierKey() : await this.#options.resolveWalletKey()
+      : undefined
     const body = await buildRequestBody(
       model === options.model ? options : { ...options, model },
       this.#options.resolveImage,
@@ -202,11 +211,13 @@ export class BlockrunAdapter extends LlmAdapter {
     const bodyChars = JSON.stringify(body).length
     const capacity = await this.#declaredContextWindow(model, options.signal)
 
-    const client = new BlockrunClient({
-      privateKey,
-      apiUrl: connection.apiUrl,
-      timeout: connection.timeoutMs,
-    })
+    const client = new BlockrunClient(apiKey === undefined
+      ? { privateKey: privateKey!, apiUrl: connection.apiUrl, timeout: connection.timeoutMs }
+      : {
+          apiKey,
+          timeout: connection.timeoutMs,
+          ...connection.accountApiUrl === undefined ? {} : { apiUrl: connection.accountApiUrl },
+        })
 
     const translator = new StreamTranslator()
     const iterator = client.stream<BlockrunStreamChunk>(CHAT_PATH, body)[Symbol.asyncIterator]()
@@ -226,7 +237,9 @@ export class BlockrunAdapter extends LlmAdapter {
           throw asLlmError(
             error,
             looksOversized(bodyChars, capacity),
-            free ? { kind: 'free-tier', model } : { kind: 'wallet', address: client.getWalletAddress() },
+            apiKey !== undefined
+              ? { kind: 'api-key' }
+              : free ? { kind: 'free-tier', model } : { kind: 'wallet', address: client.getWalletAddress() },
           )
         }
         if (next.done === true) break
@@ -469,6 +482,7 @@ function failureDetail(error: unknown): string {
 type PaymentContext =
   | { kind: 'wallet'; address?: string }
   | { kind: 'free-tier'; model: string }
+  | { kind: 'api-key' }
 
 /** The sentence a payment failure appends, or nothing when it is not one. */
 function fundingAdvice(context: PaymentContext | undefined): string {
@@ -479,6 +493,9 @@ function fundingAdvice(context: PaymentContext | undefined): string {
   // variable they set.
   if (context.kind === 'wallet') {
     return context.address === undefined ? '' : ` Send USDC on Base to ${context.address}, then retry.`
+  }
+  if (context.kind === 'api-key') {
+    return ' Add account credits at https://user.blockrun.ai/dashboard/credits, then retry.'
   }
   // The catalog said this model was free and the gateway then asked to be
   // paid, so the catalog is stale — the free tier turns over fast enough for

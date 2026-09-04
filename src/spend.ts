@@ -222,6 +222,6 @@ export function renderSpend(summary: SpendSummary): string {
       + "model's rate rather than any single number here.",
     )
   }
-  lines.push('Only completed calls are counted. Your wallet balance is the authority.')
+  lines.push('Only completed calls are counted. Your account dashboard or wallet balance is the authority.')
   return lines.join('\n')
 }

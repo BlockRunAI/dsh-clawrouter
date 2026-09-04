@@ -123,7 +123,10 @@ function failureCode(chunks: readonly StreamChunk[]): string | undefined {
 
 // A name no environment sets, so the "no wallet" path is exercised regardless
 // of what the machine running these tests happens to export.
-const ABSENT = ["    walletKeyEnv: 'DSH_CLAWROUTER_TEST_ABSENT_KEY'"]
+const ABSENT = [
+  "    apiKeyEnv: 'DSH_CLAWROUTER_TEST_ABSENT_API_KEY'",
+  "    walletKeyEnv: 'DSH_CLAWROUTER_TEST_ABSENT_KEY'",
+]
 
 /** Point the route at the local catalog above rather than the live gateway. */
 function local(): string[] {
@@ -160,6 +163,22 @@ describe('provider route, booted through the real Loader', () => {
       expect(failureCode(await drain(ctx, 'blockrun'))).toBe('INVALID_CREDENTIAL')
     } finally {
       delete process.env['DSH_CLAWROUTER_TEST_BAD_KEY']
+    }
+  }, 30_000)
+
+  it('fails with INVALID_CREDENTIAL instead of falling back when the account key is malformed', async () => {
+    process.env['DSH_CLAWROUTER_TEST_BAD_API_KEY'] = 'not-an-api-key'
+    process.env['DSH_CLAWROUTER_TEST_VALID_WALLET'] = `0x${'1'.repeat(64)}`
+    try {
+      const ctx = await boot([
+        "    apiKeyEnv: 'DSH_CLAWROUTER_TEST_BAD_API_KEY'",
+        "    walletKeyEnv: 'DSH_CLAWROUTER_TEST_VALID_WALLET'",
+        ...local(),
+      ])
+      expect(failureCode(await drain(ctx, 'blockrun'))).toBe('INVALID_CREDENTIAL')
+    } finally {
+      delete process.env['DSH_CLAWROUTER_TEST_BAD_API_KEY']
+      delete process.env['DSH_CLAWROUTER_TEST_VALID_WALLET']
     }
   }, 30_000)
 
