@@ -4,6 +4,67 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.12.0 — 2026-09-05
+
+### Added
+- **This route now pays on Solana, and prefers it to Base.** Set `SOLANA_WALLET_KEY` to a bs58 secret key and every model on the route is reachable over x402 on Solana: the gateway answers `402`, the client signs an SPL TransferChecked authorization locally, and the retry carries it. `sol.blockrun.ai` serves the same catalog as `blockrun.ai` — verified id for id on 2026-09-05, no difference at all — so a model pinned in a profile does not stop existing because a deployment changed chains.
+
+  The credential order is now API key, then Solana, then Base. Solana goes ahead of Base because a deployment holding both wallets has said which chains it *can* pay on, not which it prefers. Nothing about an existing deployment changes: set no Solana key and the route resolves exactly as it did.
+
+  This is not a base URL swap. An EIP-3009 signature is not an SPL TransferChecked one, so the Solana path drives `SolanaLLMClient` — a different signer on a different curve settling on a different chain. It needed `@blockrun/llm` **3.15.0**, whose `SolanaLLMClient.stream()` this release is the first consumer of; before that the client could not stream at all, which is why "Solana support" could not be a documentation change.
+
+- **`solanaWalletKeyEnv`, `solanaApiUrl` and `solanaRequestFeeUsd` configuration keys**, plus `requestFeeFor` and `DEFAULT_SOLANA_API_URL` on the public surface.
+
+- **`@solana/web3.js` and `@solana/spl-token` as OPTIONAL peer dependencies.** Optional rather than direct, because `@solana/spl-token` pulls in `bigint-buffer`, whose native `toBigIntLE()` carries an unpatched buffer overflow with no fixed release anywhere. An API-key or Base-only deployment must not inherit that to reach a path it never takes. A Solana request without them fails naming the packages.
+
+### Fixed
+- **`/spend` reported the wrong number on Solana, by a factor of two.** The meter priced every wallet call at one flat figure, and the two gateways do not quote the same request the same way: measured 2026-09-05, `deepseek/deepseek-chat` capped at 5 output tokens is quoted `{"amount":"2000"}` on Base and `{"amount":"1000"}` on Solana, both µUSDC. The fee now travels with the credential, so a Base call is counted at the Base quote and a Solana call at the Solana one, and a session that used both reports `mixed` and explains both. A caller that constructed `SpendMeter(price)` and wired no per-chain function keeps its own figure — overriding that silently would have made the constructor argument a decoration.
+
+- **A Solana-only deployment read its model catalog from a host it never talks to.** The catalog endpoint was resolved by asking for the FREE-tier credential, which takes a short-circuit that answers with the Base gateway whatever else is configured. It now asks for the paying credential and falls back to the free branch only when there is no credential at all — so an account key lists the account's own sheet, a Solana deployment lists Solana's, and an unconfigured one still gets a public catalog. Caught by the composition test that points `apiUrl` at a hostname which does not resolve.
+
+- **A payment failure named no chain, and said nothing at all when the address could not be derived.** USDC sent to the wrong chain's address is gone, so "Send USDC to 0x…" beside two configured wallets is worse than useless. Every wallet payment failure now names the chain along with the address; when the address cannot be derived — deriving a Solana one loads an optional peer, which can fail for reasons unrelated to the payment — it still says which wallet is short instead of returning an empty string.
+
+### Changed
+- **`@blockrun/llm` ^3.14.3 → ^3.15.0.**
+- **`npm run probe:vision` uses a Solana wallet when one is exported**, after an API key and before a Base wallet — the same order the plugin resolves in.
+- **`npm run test:e2e` is three independent live suites** — Base wallet, Solana wallet, account host — each skipping when its own credential is absent, and none falling back to another. A suite that quietly tested a different chain would report green for a path it never touched.
+- **README, in both languages**, documents all three payment paths with Solana ahead of Base, and says plainly that sending the wrong chain's USDC loses it.
+
+### Known gaps
+- **`/spend`'s "a different model answered" line can still appear when nothing was substituted.** OpenAI-family models echo the vendor-versioned id. Measured identical on all three hosts; cosmetic, still unfixed.
+
+## 0.11.0 — 2026-09-05
+
+### Added
+- **This route now takes a BlockRun API key, and prefers one.** Set `BLOCKRUN_API_KEY` to a `brk_live_…` key from [user.blockrun.ai](https://user.blockrun.ai) and every model on the route is reachable without a wallet, a private key, or a chain. The account is billed **post-hoc at actual token usage** against the published price sheet — no $0.001 per-call minimum and no per-call transaction fee, which are both properties of the x402 quote and of nothing else — and every call lands on the account ledger behind `/dashboard/activity` with its request id, model, tokens and cost.
+
+  It is a second credential, not a replacement: `walletKeyEnv` behaves exactly as it did, and a deployment that sets no API key is unchanged in every respect. The API key is checked **first** when both are present, because paying from a wallet somebody merely happens to have exported would spend money on a call they meant to put on the account — and `BlockrunClient` refuses both credentials at once anyway.
+
+  The two hosts are not interchangeable and neither are the credentials. Measured: `Authorization: Bearer brk_live_…` against `blockrun.ai/api` is answered **402**, and the account host answers an unauthenticated request **401** whatever the model costs — including a `billing_mode: "free"` one, so the wallet path's "free needs no credential" shortcut deliberately does not carry over. `apiKeyUrl` (`https://api.blockrun.ai`) is therefore a separate configuration key from `apiUrl`, not a preference.
+
+- **`apiKeyEnv` and `apiKeyUrl` configuration keys**, plus `AuthResolver` / `BlockrunAuth` on the public surface for anyone composing the adapter directly.
+
+### Fixed
+- **`/spend` would have invented the bill on an API key, and by orders of magnitude.** The meter prices a call as `paid calls × requestFeeUsd`, which is exact for an x402 quote and pure fiction for account billing. A session of a hundred short calls would have reported $0.20 against an invoice of a fraction of a cent. Account-billed calls are now priced from the tokens the provider reported at the catalog's own published per-million rates — the same arithmetic the ledger performs — and verified against the live account host: `openai/gpt-5.5` on 16 input / 17 output reports `$0.000590`, which is `16/1M × $5 + 17/1M × $30`.
+
+  Three consequences worth naming. A model the catalog publishes **no** rate for is counted as *unpriced* and said so, never silently as `$0` — zero reads as "this was free", which is the one thing it does not mean. The large-context floor warning no longer fires on an account, because that warning is about a quote and an account call has none: it is invoiced from the very counts printed above it. And a session that switched mid-way reports `mixed` and prints both explanations, because the earlier calls really did settle a quote.
+
+- **A payment failure under an API key crashed instead of explaining itself.** The `402` path asked the SDK client for the wallet address to fund, and under account billing that call throws — there is no address, because nothing is derived from a key. Reaching it from inside the `catch` replaced an actionable payment failure with a `requireWallet` `TypeError` from the SDK. The advice would have been wrong even if it had worked: an account is prepaid, and USDC sent to any address on any chain cannot settle the call. It now names the top-up page instead. The wallet path still names the address, which remains the one fact a reader cannot work out from what they configured.
+
+- **The model catalog would have come back empty on an API key.** It was read with a bare `fetch` and no credential, and `api.blockrun.ai/v1/models` answers that `401` — leaving the route with no model list, and therefore no selector, no typo check, and no rates for `/spend` to bill from. The catalog now follows the resolved credential to its own host, carries the bearer token when there is one, and treats the host as part of its cache key so a deployment that gains a key does not keep serving the other host's listing.
+
+### Changed
+- **`@blockrun/llm` 3.13.1 → 3.14.3**, which is the release that accepts `apiKey`.
+- **The model count said 73; the gateway now serves 75.** Regenerated with `npm run sync:models`; the free count is unchanged at 7.
+- **The composition tests now redirect `apiKeyEnv` as well as `walletKeyEnv`** to names nothing sets. `apiKeyEnv` defaults to `BLOCKRUN_API_KEY`, which is exactly the variable a developer running these tests is likely to have exported — and picking it up would have quietly turned assertions about a missing credential into assertions about someone's real account.
+- **`npm run probe:vision` uses an API key when one is exported.** Same measurement, billed at actual usage rather than at forty flat quotes.
+- **README, in both languages**, now leads with the API key: where to sign up, how to add credit, where the key is issued, and where the spend shows up — with the wallet path kept intact beside it for anyone who would rather not have an account. The `/spend` section says which of the two arithmetics produced the number it printed.
+
+### Known gaps
+- **There is no balance or usage endpoint to read.** `api.blockrun.ai` publishes `/v1/chat/completions`, `/v1/messages` and the model catalogs; `/v1/usage`, `/v1/balance` and the rest are `404`. So `/spend` cannot show remaining credit, and an exhausted account is discovered by a `PAYMENT_REQUIRED` rather than by a warning beforehand.
+- **Solana is unchanged.** `sol.blockrun.ai` serves the same catalog and quotes x402 in USDC on Solana, but `@blockrun/llm`'s `SolanaLLMClient` exposes no `stream()` — and this adapter is streaming-only — so a Solana wallet cannot drive this route today. An API key is chain-agnostic, which is the practical answer in the meantime: the account settles upstream on its own.
+- **`/spend`'s "a different model answered" line can appear when nothing was substituted.** OpenAI-family models echo the vendor-versioned id (`openai/gpt-5.5` comes back as `gpt-5.5-2026-04-23`), which reads as a substitution. Measured identical on both hosts, so it predates this release; it is cosmetic and not yet fixed.
+
 ## 0.10.6 — 2026-08-31
 
 ### Added

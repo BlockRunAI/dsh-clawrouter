@@ -62,7 +62,7 @@ for (const path of ['README.md', 'docs/README.zh.md']) {
 // markers were first filled, so npm showed 70 while every README said 67 — the
 // generator has to own every site or it just moves the stale copy somewhere
 // less visible.
-const PACKAGE_COUNT = /(plus )\d+( models from one wallet)/
+const PACKAGE_COUNT = /(plus )\d+( models from one credential)/
 const manifestPath = 'package.json'
 const manifest = readFileSync(manifestPath, 'utf8')
 if (!PACKAGE_COUNT.test(manifest)) throw new Error(`${manifestPath} description no longer matches ${PACKAGE_COUNT}`)

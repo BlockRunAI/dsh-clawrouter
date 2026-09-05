@@ -63,7 +63,7 @@ describe('SpendMeter', () => {
     const meter = new SpendMeter(PRICE)
     meter.record('deepseek/deepseek-chat', usage(14, 1))
     const text = renderSpend(meter.summary())
-    expect(text).toMatch(/Quoted from the request/)
+    expect(text).toMatch(/quoted from the request/)
     expect(text).toMatch(/wallet balance is the authority/)
     // Small amounts stay legible rather than rounding to $0.00.
     expect(text).not.toMatch(/\$0\.00\b/)
@@ -176,7 +176,7 @@ describe('free-tier calls settle nothing, so they cost nothing', () => {
     meter.record(FREE, usage(20, 40), true)
     const text = renderSpend(meter.summary())
     expect(text).toMatch(/no payment was signed/)
-    expect(text).toMatch(/nothing was quoted and nothing settled/)
+    expect(text).toMatch(/nothing was quoted, nothing settled/)
     // The quote explanation describes a handshake that never happened here.
     expect(text).not.toMatch(/Quoted from the request/)
   })
@@ -260,5 +260,96 @@ describe('a substituted model is named, not hidden', () => {
     const meter = new SpendMeter(PRICE)
     meter.record('deepseek/deepseek-chat', usage(17, 3))
     expect(renderSpend(meter.summary())).not.toMatch(/answered by/)
+  })
+})
+
+describe('account billing is priced from tokens, not from a per-request quote', () => {
+  // The flat figure is a property of the x402 quote and of nothing else.
+  // api.blockrun.ai bills the account post-hoc at ACTUAL usage against the
+  // published sheet — no per-call fee, no minimum — so charging $0.002 a call
+  // there would report several times what the account is invoiced for a
+  // session of small calls, which is the exact number a customer disputes.
+  const rates = { input: 5, output: 30 }
+  const account = { kind: 'per-token', rates } as const
+
+  it('multiplies the reported tokens by the published per-million rates', () => {
+    const meter = new SpendMeter(0.002)
+    meter.record('openai/gpt-5.5', usage(16, 17), false, undefined, account)
+    // 16/1e6 * $5 + 17/1e6 * $30 — measured against the live account host,
+    // which billed this exact call.
+    expect(meter.summary().totalUsd).toBeCloseTo(0.00059, 10)
+    expect(meter.summary().basis).toBe('per-token')
+  })
+
+  it('does not charge the per-request fee on top, because the account has none', () => {
+    const meter = new SpendMeter(0.002)
+    meter.record('openai/gpt-5.5', usage(16, 17), false, undefined, account)
+    expect(meter.summary().totalUsd).toBeLessThan(0.002)
+  })
+
+  it('folds cached input back in, because that is what the invoice prices', () => {
+    // This route speaks the OpenAI protocol, where `prompt_tokens` is
+    // cache-inclusive and the account meter prices the whole of it at the
+    // input rate. `translate.ts` splits the cached part out for the harness's
+    // disjoint buckets; dropping it here would under-bill every cached turn.
+    const meter = new SpendMeter(0.002)
+    meter.record('openai/gpt-5.5', usage(10, 0, 90), false, undefined, account)
+    expect(meter.summary().totalUsd).toBeCloseTo((100 / 1e6) * 5, 12)
+  })
+
+  it('counts a model the catalog does not price as unpriced, never as free', () => {
+    // Zero would read as "this cost nothing", which is the one thing it does
+    // not mean. The row says the figure is short and by how many calls.
+    const meter = new SpendMeter(0.002)
+    meter.record('vendor/unlisted', usage(1000, 1000), false, undefined, { kind: 'per-token' })
+    const summary = meter.summary()
+    expect(summary.totalUsd).toBe(0)
+    expect(summary.byModel[0]?.free).toBeUndefined()
+    expect(summary.byModel[0]?.unpricedCalls).toBe(1)
+    expect(renderSpend(summary)).toMatch(/NOT in the figure above/)
+  })
+
+  it('still costs nothing for a free model, whichever scheme is in force', () => {
+    const meter = new SpendMeter(0.002)
+    meter.record('nvidia/nemotron-3.5-lightning', usage(20, 5), true, undefined, account)
+    expect(meter.summary().totalUsd).toBe(0)
+    expect(meter.summary().byModel[0]?.free).toBe(true)
+  })
+
+  it('points at the account ledger rather than at a wallet balance', () => {
+    const meter = new SpendMeter(0.002)
+    meter.record('openai/gpt-5.5', usage(16, 17), false, undefined, account)
+    const text = renderSpend(meter.summary())
+    expect(text).toMatch(/user\.blockrun\.ai\/dashboard is the authority/)
+    expect(text).not.toMatch(/wallet balance/)
+  })
+
+  it('never calls an exact figure a floor, however long the context', () => {
+    // The floor warning belongs to the quote, and an account call has none:
+    // it is invoiced from the very counts printed above it.
+    const meter = new SpendMeter(0.002)
+    meter.record('openai/gpt-5.5', usage(112_000, 500), false, undefined, account)
+    expect(renderSpend(meter.summary())).not.toMatch(/THIS TOTAL IS A FLOOR/)
+  })
+
+  it('describes both schemes when a key was added mid-session', () => {
+    // A deployment can legitimately switch: the earlier calls really did
+    // settle a quote, and saying so is the only way the total adds up.
+    const meter = new SpendMeter(0.002)
+    meter.record('deepseek/deepseek-chat', usage(14, 1))
+    meter.record('openai/gpt-5.5', usage(16, 17), false, undefined, account)
+    const summary = meter.summary()
+    expect(summary.basis).toBe('mixed')
+    expect(summary.totalUsd).toBeCloseTo(0.002 + 0.00059, 10)
+    const text = renderSpend(summary)
+    expect(text).toMatch(/API key \(account billing\)/)
+    expect(text).toMatch(/Wallet \(x402\)/)
+  })
+
+  it('leaves an unconfigured caller on the wallet scheme, so nothing under-reports', () => {
+    const meter = new SpendMeter(0.002)
+    meter.record('deepseek/deepseek-chat', usage(14, 1))
+    expect(meter.summary().basis).toBe('per-request')
+    expect(meter.summary().totalUsd).toBe(0.002)
   })
 })

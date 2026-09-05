@@ -3,17 +3,38 @@
 # A patch layer replaces a row's whole `config` rather than merging keys, so a
 # profile overriding either row below must restate every key it needs.
 #
-# Credentials are REFERENCES, never values: `walletKeyEnv` names the environment
-# variable (or managed credential) holding the wallet key, resolved per request
+# Credentials are REFERENCES, never values: the keys below name the environment
+# variable (or managed credential) holding each secret, resolved per request
 # through `ctx.credentials`. No secret belongs in this file.
 - insert:
-    # The BlockRun provider route. Registers `blockrun` on ctx.llm, paid per
-    # request in USDC over x402. Adding this route does NOT change the agent's
-    # default model — `dsh-base` keeps `deepseek-official`, and this route is
-    # selected explicitly (or used by the review gate below).
+    # The BlockRun provider route. Registers `blockrun` on ctx.llm.
+    #
+    # It takes any one of three credentials, and looks for them in this order:
+    #
+    #   1. BLOCKRUN_API_KEY — a `brk_live_…` account key from
+    #      https://user.blockrun.ai/dashboard/keys. Billed at exact token
+    #      usage with no per-call fee, and every call shows up on the
+    #      account's own dashboard. This is the recommended way in.
+    #   2. SOLANA_WALLET_KEY — a bs58 Solana secret key, paying each request
+    #      in SPL USDC over x402. Needs @solana/web3.js and @solana/spl-token
+    #      installed; they are optional peers, so a Base-only or API-key
+    #      deployment does not carry them.
+    #   3. BASE_CHAIN_WALLET_KEY — an EVM wallet key, paying each request in
+    #      Base USDC over x402.
+    #
+    # Solana is checked before Base: a deployment holding both wallets has said
+    # which chains it CAN pay on, not which it prefers. Both gateways serve the
+    # same catalog, verified id for id.
+    #
+    # With none of the three, the models the catalog bills as `free` still work.
+    # Adding this route does NOT change the agent's default model — `dsh-base`
+    # keeps `deepseek-official`, and this route is selected explicitly (or used
+    # by the review gate below).
     - id: blockrun-llm
       name: dsh-clawrouter
       config:
+        apiKeyEnv: BLOCKRUN_API_KEY
+        solanaWalletKeyEnv: SOLANA_WALLET_KEY
         walletKeyEnv: BASE_CHAIN_WALLET_KEY
 
     # The review gate. A strong model inspects risky tool calls before they run

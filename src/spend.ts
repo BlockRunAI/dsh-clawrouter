@@ -19,6 +19,15 @@
  * that failed after its payment settled. Reporting the quote itself would be
  * exact in every case, and needs the SDK to expose it.
  *
+ * An API-key deployment is billed on a different basis entirely, so it is
+ * counted on a different one: `api.blockrun.ai` meters ACTUAL token usage
+ * against the published price sheet, with no per-call minimum and no per-call
+ * fee. There the flat figure above is not a floor, it is a fiction — a session
+ * of small calls would be reported at several times what the account is
+ * invoiced. So an account-billed call is priced from its own tokens and the
+ * catalog's own rates, which is the arithmetic the ledger behind
+ * `user.blockrun.ai/dashboard` performs. See {@link CallPricing}.
+ *
  * It lives in memory for the life of the process. A durable per-session figure
  * would need a session event, which a plugin outside the harness repository
  * cannot write.
@@ -27,14 +36,15 @@
  */
 
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
+import { PORTAL_URL } from './auth.ts'
 
 /**
  * Per-million-token rates as the catalog publishes them.
  *
- * Kept because the catalog states them and a selector may want to show them.
- * They are deliberately NOT used to compute what a call cost: settlement
- * follows the per-request quote, and pricing a call from its tokens was
- * measured overstating a real charge by more than double.
+ * These price an ACCOUNT-billed call and nothing else. On the wallet path they
+ * are carried for display only: settlement there follows the per-request
+ * quote, and pricing such a call from its tokens was measured overstating a
+ * real charge by more than double.
  */
 export interface ModelRates {
   /** USD per million input tokens. */
@@ -49,8 +59,23 @@ export interface ModelSpend {
   calls: number
   inputTokens: number
   outputTokens: number
-  /** `paid calls x` the per-request price. Token counts do not enter this. */
+  /**
+   * What this model has cost.
+   *
+   * On the wallet path that is `paid calls x` the per-request price, and token
+   * counts do not enter it. On the account path it is the tokens themselves,
+   * at the catalog's published rates.
+   */
   costUsd: number
+  /**
+   * Account-billed calls the catalog published no rate for, and which are
+   * therefore missing from `costUsd`.
+   *
+   * Reported rather than absorbed: a total that quietly counts an unpriceable
+   * call as zero is wrong in the direction that costs the reader money, and a
+   * model the sheet does not price is exactly the one worth looking up.
+   */
+  unpricedCalls?: number
   /**
    * Set when every call to this model was served free of charge.
    *
@@ -72,20 +97,65 @@ export interface ModelSpend {
   servedBy?: Record<string, number>
 }
 
-/** A model's running totals, plus the paid-call count `costUsd` is computed from. */
+/** A model's running totals, plus the counters `costUsd` is computed from. */
 interface Tally extends ModelSpend {
-  /** Calls that actually settled on chain; free-tier calls are excluded. */
+  /** Calls that cost money under either scheme; free-tier calls are excluded. */
   paidCalls: number
+  /** Paid calls priced at the flat per-request quote — the wallet paths. */
+  flatCalls: number
+  /** Their summed quotes, which are not `flatCalls x` one number: see {@link CallPricing}. */
+  flatCostUsd: number
+  /** Account-billed cost accumulated from tokens x published rates. */
+  tokenCostUsd: number
   /** Substitutions by served model id, accumulated in place. */
   substitutions: Map<string, number>
 }
 
+/**
+ * How one call is charged.
+ *
+ * The two schemes are not variations on a number, they are different
+ * questions: a wallet call settles a quote struck before the model answered,
+ * and an account call is invoiced from what the model actually produced. A
+ * meter that averaged them would be wrong under both.
+ */
+export type CallPricing =
+  /**
+   * x402: the flat per-request quote, settled whatever the model then does.
+   * @remarks `feeUsd` is the quote for the chain this call settles on — Base
+   * and Solana are quoted differently for the same request, so a meter holding
+   * one figure is wrong on one of them. Absent falls back to the meter's own
+   * default, which is what an older caller passing no fee gets.
+   */
+  | { readonly kind: 'per-request'; readonly feeUsd?: number }
+  /**
+   * Account billing at exact usage.
+   * @remarks `rates` absent means the catalog published none for this model,
+   * which is counted as unpriced rather than as free.
+   */
+  | { readonly kind: 'per-token'; readonly rates?: ModelRates }
+
+/** The wallet path's scheme, and the default for every caller that names none. */
+const PER_REQUEST: CallPricing = { kind: 'per-request' }
+
 /** Input size past which the per-request floor stops resembling the real charge. */
 export const FLOOR_RELIABLE_INPUT_TOKENS = 1_000
+
+/**
+ * Which scheme (or schemes) the counted calls were charged under.
+ *
+ * Carried because the sentence under a total is not decoration — it says what
+ * the number is and is not, and the two schemes need opposite warnings. A
+ * deployment can legitimately be `mixed`: an API key added mid-session moves
+ * later calls onto account billing without unwinding the earlier ones.
+ */
+export type SpendBasis = 'per-request' | 'per-token' | 'mixed' | 'none'
 
 /** Everything the meter knows. */
 export interface SpendSummary {
   calls: number
+  /** The scheme behind `totalUsd`; `none` when nothing has been charged yet. */
+  basis: SpendBasis
   /** Carried for context only; deliberately not priced. */
   inputTokens: number
   /** Carried for context only; deliberately not priced. */
@@ -122,17 +192,53 @@ export class SpendMeter {
    *   on does not move the total, and the requested id is the one the reader
    *   picked.
    */
-  record(model: string, usage: TokenUsage, free = false, servedModel?: string): void {
-    const entry = this.#models.get(model)
-      ?? { model, calls: 0, paidCalls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, substitutions: new Map() }
+  record(
+    model: string,
+    usage: TokenUsage,
+    free = false,
+    servedModel?: string,
+    pricing: CallPricing = PER_REQUEST,
+  ): void {
+    const entry: Tally = this.#models.get(model) ?? {
+      model,
+      calls: 0,
+      paidCalls: 0,
+      flatCalls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      flatCostUsd: 0,
+      tokenCostUsd: 0,
+      substitutions: new Map(),
+    }
     entry.calls += 1
-    if (!free) entry.paidCalls += 1
     if (servedModel !== undefined && servedModel !== model) {
       entry.substitutions.set(servedModel, (entry.substitutions.get(servedModel) ?? 0) + 1)
     }
-    entry.inputTokens += usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+    // Summed back into one figure because that is what the account is billed
+    // on: this route speaks the OpenAI protocol, where `prompt_tokens` is
+    // cache-INCLUSIVE and the meter behind api.blockrun.ai prices the whole of
+    // it at the input rate. `translate.ts` splits the cached part out for the
+    // harness's disjoint buckets, so re-adding it here restores the number the
+    // invoice is computed from rather than inventing a second one.
+    const input = usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+    entry.inputTokens += input
     entry.outputTokens += usage.outputTokens
-    entry.costUsd = entry.paidCalls * this.requestPriceUsd
+    if (!free) {
+      entry.paidCalls += 1
+      if (pricing.kind === 'per-request') {
+        entry.flatCalls += 1
+        entry.flatCostUsd += pricing.feeUsd ?? this.requestPriceUsd
+      } else if (pricing.rates === undefined) {
+        // Counted, never guessed. Zero would read as free and any invented
+        // rate would read as fact.
+        entry.unpricedCalls = (entry.unpricedCalls ?? 0) + 1
+      } else {
+        entry.tokenCostUsd += (input / 1e6) * (pricing.rates.input ?? 0)
+          + (usage.outputTokens / 1e6) * (pricing.rates.output ?? 0)
+      }
+    }
+    entry.costUsd = entry.flatCostUsd + entry.tokenCostUsd
     this.#models.set(model, entry)
   }
 
@@ -141,22 +247,30 @@ export class SpendMeter {
    * @returns a detached summary, busiest model first.
    */
   summary(): SpendSummary {
-    const byModel = [...this.#models.values()]
-      .sort((left, right) => right.calls - left.calls)
-      .map(({ model, calls, inputTokens, outputTokens, costUsd, paidCalls, substitutions }) => ({
-        model,
-        calls,
-        inputTokens,
-        outputTokens,
-        costUsd,
-        // Claimed only for a model that has never once been charged for. A
-        // model repriced mid-process keeps its real cost and loses the label,
-        // rather than showing a partial total under a "free" heading.
-        ...paidCalls === 0 ? { free: true } : {},
-        ...substitutions.size === 0 ? {} : { servedBy: Object.fromEntries(substitutions) },
-      }))
+    const tallies = [...this.#models.values()].sort((left, right) => right.calls - left.calls)
+    const byModel = tallies.map((
+      { model, calls, inputTokens, outputTokens, costUsd, paidCalls, substitutions, unpricedCalls },
+    ) => ({
+      model,
+      calls,
+      inputTokens,
+      outputTokens,
+      costUsd,
+      // Claimed only for a model that has never once been charged for. A
+      // model repriced mid-process keeps its real cost and loses the label,
+      // rather than showing a partial total under a "free" heading.
+      ...paidCalls === 0 ? { free: true } : {},
+      ...unpricedCalls === undefined ? {} : { unpricedCalls },
+      ...substitutions.size === 0 ? {} : { servedBy: Object.fromEntries(substitutions) },
+    }))
+    // Read off the counters rather than off configuration, so a key added
+    // mid-session is described as what it did rather than as what the plugin
+    // is currently set to.
+    const flat = tallies.some(entry => entry.flatCalls > 0)
+    const metered = tallies.some(entry => entry.tokenCostUsd > 0 || entry.unpricedCalls !== undefined)
     return {
       calls: byModel.reduce((sum, entry) => sum + entry.calls, 0),
+      basis: flat && metered ? 'mixed' : flat ? 'per-request' : metered ? 'per-token' : 'none',
       inputTokens: byModel.reduce((sum, entry) => sum + entry.inputTokens, 0),
       outputTokens: byModel.reduce((sum, entry) => sum + entry.outputTokens, 0),
       // Summed from the rows rather than from the call count, so the total and
@@ -190,6 +304,12 @@ export function renderSpend(summary: SpendSummary): string {
       `  ${entry.model}  ${usd(entry.costUsd)}  ${entry.calls} call${entry.calls === 1 ? '' : 's'}`
       + (entry.free === true ? '  (free tier — no payment was signed)' : ''),
     )
+    if (entry.unpricedCalls !== undefined) {
+      lines.push(
+        `      ${entry.unpricedCalls} of these are NOT in the figure above — the catalog published no`
+        + ' per-token rate for this model, and a price nobody published is not one to invent.',
+      )
+    }
     // Printed under the row rather than folded into it, because it is not a
     // detail of the cost — it says the answer came from somewhere else, which
     // is a fact about the reply rather than about the bill.
@@ -204,14 +324,11 @@ export function renderSpend(summary: SpendSummary): string {
   const paid = summary.byModel.filter(entry => entry.free !== true)
   const paidCalls = paid.reduce((sum, entry) => sum + entry.calls, 0)
   const averageInput = paidCalls === 0 ? 0 : paid.reduce((sum, entry) => sum + entry.inputTokens, 0) / paidCalls
-  lines.push(
-    '',
-    paidCalls === 0
-      ? 'Every call so far went to a free model: the gateway answers those with no x402 handshake, so nothing was quoted and nothing settled.'
-      : 'Quoted from the request — input size plus the max_tokens asked for — and settled at that amount whichever way the model answers.'
-        + ' These counts are what was produced, so they cannot reconstruct the charge.',
-  )
-  if (averageInput > FLOOR_RELIABLE_INPUT_TOKENS) {
+  lines.push('', ...basisNotes(summary.basis, paidCalls))
+  // The floor warning belongs to the quote, and an account-billed call has no
+  // quote — it is invoiced from the very counts printed above. Printing it
+  // there would warn a reader off a number that is exact.
+  if (summary.basis !== 'per-token' && averageInput > FLOOR_RELIABLE_INPUT_TOKENS) {
     // Silence here would be the misleading part. The quote climbs with input,
     // so on a long context this total is not slightly low, it is a different
     // order of magnitude.
@@ -222,6 +339,45 @@ export function renderSpend(summary: SpendSummary): string {
       + "model's rate rather than any single number here.",
     )
   }
-  lines.push('Only completed calls are counted. Your wallet balance is the authority.')
+  lines.push(
+    'Only completed calls are counted. '
+    + (summary.basis === 'per-token'
+      ? `Your account ledger at ${PORTAL_URL}/dashboard is the authority.`
+      : 'Your wallet balance is the authority.'),
+  )
   return lines.join('\n')
+}
+
+/**
+ * The sentences that say what the total above actually is.
+ *
+ * Split out because the two schemes need opposite ones and a deployment can be
+ * on both: the wallet total is a floor derived from quotes, the account total
+ * is the same arithmetic the invoice uses. Saying either about the other is
+ * the kind of wrong that ends in a surprised customer.
+ * @param basis - which scheme(s) the counted calls settled under.
+ * @param paidCalls - calls that cost anything at all.
+ * @returns one line per applicable scheme.
+ */
+function basisNotes(basis: SpendBasis, paidCalls: number): string[] {
+  if (paidCalls === 0) {
+    return [
+      'Every call so far went to a free model: nothing was quoted, nothing settled, and nothing is owed.',
+    ]
+  }
+  const notes: string[] = []
+  if (basis === 'per-token' || basis === 'mixed') {
+    notes.push(
+      'API key (account billing): priced from the tokens the provider reported, at the catalog\'s published'
+      + ' per-million rates — the same basis your account is invoiced on, with no per-call fee and no minimum.',
+    )
+  }
+  if (basis === 'per-request' || basis === 'mixed') {
+    notes.push(
+      'Wallet (x402): quoted from the request — input size plus the max_tokens asked for — and settled at that'
+      + ' amount whichever way the model answers. These counts are what was produced, so they cannot'
+      + ' reconstruct the charge.',
+    )
+  }
+  return notes
 }

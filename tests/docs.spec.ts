@@ -130,11 +130,22 @@ describe('the funding advice is arithmetic, not a slogan', () => {
   // document itself measures is the same defect as quoting a stale figure.
   const FUNDING_USD = 5
 
-  /** The two call counts the funding paragraph promises, in document order. */
+  /**
+   * The two call counts the funding paragraph promises, in document order.
+   *
+   * Located by what the paragraph IS — the one telling a reader how much USDC
+   * to send, which is the only place two bolded call counts sit beside that
+   * word — rather than by a config key that happened to share the line. It did
+   * share it until 0.11.0 split the wallet advice away from the credential
+   * notes, at which point the locator found nothing and this suite went quiet
+   * about the arithmetic it exists to check.
+   */
   function fundingCounts(doc: string): number[] {
-    const paragraph = doc.split('\n').find(line => line.includes('walletKeyEnv') && line.includes(String(FUNDING_USD)))
+    const counts = (line: string): number[] =>
+      [...line.matchAll(/\*\*([\d,]+)\*\*/g)].map(match => Number(match[1]!.replace(/,/g, '')))
+    const paragraph = doc.split('\n').find(line => line.includes('USDC') && counts(line).length === 2)
     expect(paragraph, 'no funding paragraph found').toBeDefined()
-    return [...paragraph!.matchAll(/\*\*([\d,]+)\*\*/g)].map(match => Number(match[1]!.replace(/,/g, '')))
+    return counts(paragraph!)
   }
 
   it.each([['English', EN], ['Chinese', ZH]])('%s: quotes both ends of the price range', (_label, doc) => {

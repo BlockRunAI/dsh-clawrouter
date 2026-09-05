@@ -1,6 +1,6 @@
 /**
- * The BlockRun `LlmAdapter`: one harness provider route whose authentication is
- * a wallet signature rather than an API key.
+ * The BlockRun `LlmAdapter`: one harness provider route reaching every model
+ * BlockRun serves, under either of the two credentials it accepts.
  *
  * Almost every request is paid per call in USDC over x402 — the gateway answers
  * an unpaid request with `402`, the client signs an EIP-3009 authorization
@@ -10,13 +10,22 @@
  *
  * The exception is the free tier, which never reaches that handshake at all:
  * the gateway answers a `billing_mode: "free"` model with `200` and no `402`,
- * so those models need no wallet and cost nothing. See {@link freeTierKey}.
+ * so those models need no wallet and cost nothing. See `freeTierKey` in
+ * {@link ./auth.ts}.
+ *
+ * A deployment holding a BlockRun account key takes a different host entirely.
+ * `api.blockrun.ai` authenticates with `Authorization: Bearer brk_live_…`,
+ * never opens a 402 handshake, and bills the account post-hoc at actual token
+ * usage — no per-call minimum, no per-call fee. The wallet path is untouched
+ * by its presence: {@link ./auth.ts | the resolver} answers with exactly one
+ * credential per request, so a deployment that configured no key still pays
+ * the way it always did. What changes is which numbers `/spend` may report;
+ * see {@link CallPricing}.
  *
  * @module dsh-clawrouter/adapter
  */
 
-import { randomBytes } from 'node:crypto'
-import { BlockrunClient } from '@blockrun/llm'
+import { BlockrunClient, SolanaLLMClient } from '@blockrun/llm'
 import {
   CONTEXT_WINDOW_EXCEEDED_CODE,
   isContextWindowExceededError,
@@ -32,6 +41,8 @@ import type {
   LlmResolvedModelInfo,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
+import { PORTAL_URL } from './auth.ts'
+import type { AuthResolver, BlockrunAuth } from './auth.ts'
 import { BlockrunCatalog, suggestModels, toModelInfo } from './catalog.ts'
 import { httpErrorCode } from './http-error.ts'
 export { httpErrorCode } from './http-error.ts'
@@ -61,7 +72,7 @@ import { buildRequestBody } from './serialize.ts'
 import type { ImageResolver } from './serialize.ts'
 import { StreamTranslator } from './translate.ts'
 import type { BlockrunStreamChunk } from './types.ts'
-import type { SpendMeter } from './spend.ts'
+import type { CallPricing, ModelRates, SpendMeter } from './spend.ts'
 
 /** Path under the API root that serves OpenAI-compatible streaming chat. */
 const CHAT_PATH = '/v1/chat/completions'
@@ -86,12 +97,25 @@ export interface BlockrunAdapterOptions {
   provider: string
   /** Reads the current connection; called once per operation, never cached. */
   connection: () => BlockrunConnection
-  /** Resolves the wallet key, or throws `LlmError('MISSING_CREDENTIAL')`. */
-  resolveWalletKey: () => Promise<string>
+  /**
+   * Resolves the credential for one request — an account key or a wallet key —
+   * or throws `LlmError('MISSING_CREDENTIAL')` when neither is configured.
+   */
+  resolveAuth: AuthResolver
   /** Model catalog for this route. */
   catalog: BlockrunCatalog
   /** Counts what completed calls cost; omitted leaves spend uncounted. */
   meter?: SpendMeter
+  /**
+   * What one request is quoted at under a given credential, or undefined when
+   * it is not quoted per request at all.
+   *
+   * A function rather than a number because the two wallet gateways quote the
+   * same request differently — `2000` µUSDC on Base against `1000` on Solana,
+   * measured — so a meter holding one figure reports double or half on one of
+   * them. Omitted falls back to the meter's own default.
+   */
+  requestFee?: (auth: BlockrunAuth) => number | undefined
   /**
    * Reads image attachments for vision requests.
    *
@@ -191,7 +215,7 @@ export class BlockrunAdapter extends LlmAdapter {
     // The catalog read this needs is not an extra one; `#assertServable` above
     // has already made it, and answers from the same cache.
     const free = await this.#options.catalog.isFree(model, options.signal)
-    const privateKey = free ? freeTierKey() : await this.#options.resolveWalletKey()
+    const auth = await this.#options.resolveAuth({ free })
     const body = await buildRequestBody(
       model === options.model ? options : { ...options, model },
       this.#options.resolveImage,
@@ -202,11 +226,35 @@ export class BlockrunAdapter extends LlmAdapter {
     const bodyChars = JSON.stringify(body).length
     const capacity = await this.#declaredContextWindow(model, options.signal)
 
-    const client = new BlockrunClient({
-      privateKey,
-      apiUrl: connection.apiUrl,
-      timeout: connection.timeoutMs,
-    })
+    // Exactly one credential reaches the SDK, and the client class follows the
+    // chain rather than the other way round: an EIP-3009 signature is not an
+    // SPL TransferChecked one, so `SolanaLLMClient` is a different signer, not
+    // a different base URL. The host is not interchangeable either — a
+    // `brk_live_…` key sent to a wallet gateway is answered `402` rather than
+    // served — so it travels with the credential that is valid against it.
+    const client: StreamingClient = auth.mode === 'solana-wallet'
+      ? new SolanaLLMClient({
+        privateKey: auth.privateKey,
+        apiUrl: auth.apiUrl,
+        timeout: connection.timeoutMs,
+      })
+      : new BlockrunClient(
+        auth.mode === 'api-key'
+          ? { apiKey: auth.apiKey, apiUrl: auth.apiUrl, timeout: connection.timeoutMs }
+          : { privateKey: auth.privateKey, apiUrl: auth.apiUrl, timeout: connection.timeoutMs },
+      )
+    // The billing scheme is a property of the CREDENTIAL, not of the plugin's
+    // configuration: an account key is invoiced at exact usage while a wallet
+    // settles a flat quote, and reporting either total under the other's rules
+    // is a number the reader cannot reconcile against anything.
+    // Absent leaves the fee to the meter's own default rather than computing
+    // one here: a caller that constructed `SpendMeter(price)` and wired no
+    // per-chain function said what a request costs on their deployment, and
+    // quietly overriding it would make that constructor argument a decoration.
+    const feeUsd = this.#options.requestFee?.(auth)
+    const pricing: CallPricing = auth.mode === 'api-key'
+      ? { kind: 'per-token', ...ratesFor(this.#options.catalog, model) }
+      : { kind: 'per-request', ...feeUsd === undefined ? {} : { feeUsd } }
 
     const translator = new StreamTranslator()
     const iterator = client.stream<BlockrunStreamChunk>(CHAT_PATH, body)[Symbol.asyncIterator]()
@@ -226,7 +274,7 @@ export class BlockrunAdapter extends LlmAdapter {
           throw asLlmError(
             error,
             looksOversized(bodyChars, capacity),
-            free ? { kind: 'free-tier', model } : { kind: 'wallet', address: client.getWalletAddress() },
+            await paymentContext(auth, client, free, model),
           )
         }
         if (next.done === true) break
@@ -237,13 +285,13 @@ export class BlockrunAdapter extends LlmAdapter {
         if (servedModel === undefined && typeof served === 'string' && served.length > 0 && served !== model) {
           servedModel = served
         }
-        yield * this.#metered(model, free, servedModel, translator.accept(next.value))
+        yield * this.#metered(model, free, servedModel, pricing, translator.accept(next.value))
       }
       // The terminal flush is metered too, and it is the one that counts: the
       // translator BUFFERS usage and emits it from `end()`, so watching only
       // the per-chunk output recorded nothing at all. It is also the flush that
       // sees the final `servedModel`, since usage arrives last.
-      yield * this.#metered(model, free, servedModel, translator.end())
+      yield * this.#metered(model, free, servedModel, pricing, translator.end())
     } finally {
       // Terminating the generator releases the SDK's reader. The in-flight
       // HTTP request is not itself cancellable until `BlockrunClient.stream`
@@ -264,6 +312,7 @@ export class BlockrunAdapter extends LlmAdapter {
    * @param model - the model the request asked for.
    * @param free - whether the gateway served it without payment.
    * @param servedModel - the model that answered, when it was a different one.
+   * @param pricing - how this credential's calls are charged.
    * @param chunks - chunks about to be yielded.
    * @returns the same chunks, unchanged.
    */
@@ -271,12 +320,13 @@ export class BlockrunAdapter extends LlmAdapter {
     model: string,
     free: boolean,
     servedModel: string | undefined,
+    pricing: CallPricing,
     chunks: readonly StreamChunk[],
   ): readonly StreamChunk[] {
     const meter = this.#options.meter
     if (meter !== undefined) {
       for (const chunk of chunks) {
-        if (chunk.type === 'usage') meter.record(model, chunk.usage, free, servedModel)
+        if (chunk.type === 'usage') meter.record(model, chunk.usage, free, servedModel, pricing)
       }
     }
     return chunks
@@ -358,39 +408,6 @@ export function auxiliaryModelFor(
   return auxiliary !== undefined && auxiliary.length > 0 ? auxiliary : options.model
 }
 
-/** Lazily generated once per process; see {@link freeTierKey}. */
-let ephemeralKey: string | undefined
-
-/**
- * A throwaway key standing in for a wallet on a free-tier request.
- *
- * `BlockrunClient` requires a private key in its constructor — it derives the
- * address it would pay from — and refuses to be built without one, falling
- * back to reading `BASE_CHAIN_WALLET_KEY` from the ambient environment if the
- * option is omitted. Neither is acceptable here: a free model needs no wallet,
- * and silently picking up whatever key happens to be exported is exactly the
- * shadowing that {@link ../index.ts | the credentials seam} exists to prevent.
- *
- * So a random one is generated instead. It is never used to sign anything: the
- * signing path runs only when the gateway answers `402`, and a free model
- * answers `200` — verified against the live gateway, where an unpaid request
- * to `nvidia/nemotron-3.5-lightning` returned `200` and the same request to
- * `deepseek/deepseek-chat` returned `402`. Nothing is derived from it that
- * outlives the process, and no funds can reach an address nobody is told.
- *
- * Generated once rather than per request, because deriving the address costs a
- * secp256k1 multiplication and a fresh key buys nothing when it signs nothing.
- * 32 random bytes are a valid secp256k1 scalar with probability
- * 1 - 2^-128; the remainder is not worth a retry loop that could never be
- * covered by a test.
- *
- * @returns the process's ephemeral free-tier key.
- */
-function freeTierKey(): string {
-  ephemeralKey ??= `0x${randomBytes(32).toString('hex')}`
-  return ephemeralKey
-}
-
 /**
  * The "did you mean" tail of an unknown-model diagnostic.
  *
@@ -467,8 +484,74 @@ function failureDetail(error: unknown): string {
  * on exit.
  */
 type PaymentContext =
-  | { kind: 'wallet'; address?: string }
+  | { kind: 'wallet'; chain: 'Base' | 'Solana'; address?: string }
   | { kind: 'free-tier'; model: string }
+  /** Account billing: the account is out of prepaid credit, and no address takes a top-up. */
+  | { kind: 'api-key' }
+
+/**
+ * The two SDK clients this route drives, in the one shape it uses them.
+ *
+ * Structural rather than a union of the concrete classes, because the only
+ * thing this adapter needs from either is `stream` — and stating that is what
+ * makes it obvious that adding a chain is adding a signer, not a code path.
+ * `getWalletAddress` differs in more than name: `SolanaLLMClient` derives its
+ * address from an ed25519 key, which is async.
+ */
+interface StreamingClient {
+  stream: <T>(path: string, body?: Record<string, unknown>) => AsyncIterable<T>
+  getWalletAddress: () => string | Promise<string>
+}
+
+/**
+ * What a failure on THIS request should say about money, if it turns out to be
+ * about money.
+ *
+ * Built before the failure is classified, because the facts it needs are the
+ * request's, not the error's — and one of them cannot be asked for twice:
+ * `getWalletAddress()` throws under an account key, since account billing
+ * derives no address at all. Calling it from inside the catch, as this once
+ * did, replaced a payment failure the reader could act on with a `requireWallet`
+ * TypeError from the SDK.
+ * @param auth - the credential this request used.
+ * @param client - the SDK client, asked for its address only when it has one.
+ * @param free - whether the catalog billed this model at zero.
+ * @param model - the model that was requested.
+ * @returns the advice context for {@link fundingAdvice}.
+ */
+async function paymentContext(
+  auth: BlockrunAuth,
+  client: StreamingClient,
+  free: boolean,
+  model: string,
+): Promise<PaymentContext> {
+  if (auth.mode === 'api-key') return { kind: 'api-key' }
+  if (free) return { kind: 'free-tier', model }
+  const chain = auth.mode === 'solana-wallet' ? 'Solana' : 'Base'
+  try {
+    return { kind: 'wallet', chain, address: await client.getWalletAddress() }
+  } catch {
+    // Deriving a Solana address loads an optional peer dependency, so it can
+    // fail for a reason that has nothing to do with the payment. The advice is
+    // worth less without the address and worthless if it throws over it.
+    return { kind: 'wallet', chain }
+  }
+}
+
+/**
+ * The published per-million rates for one model, when the catalog states any.
+ *
+ * Spread into a {@link CallPricing}, so a model the sheet does not price
+ * produces `{ kind: 'per-token' }` with no rates — which the meter counts as
+ * unpriced rather than as free.
+ * @param catalog - the route's catalog, read from its last successful listing.
+ * @param model - the model that was requested.
+ * @returns `{ rates }`, or nothing at all.
+ */
+function ratesFor(catalog: BlockrunCatalog, model: string): { rates?: ModelRates } {
+  const rates = catalog.rates.get(model)
+  return rates === undefined ? {} : { rates }
+}
 
 /** The sentence a payment failure appends, or nothing when it is not one. */
 function fundingAdvice(context: PaymentContext | undefined): string {
@@ -477,8 +560,20 @@ function fundingAdvice(context: PaymentContext | undefined): string {
   // process holds. They configured a private key; the thing to send USDC to is
   // the address derived from it, which they have no way to work out from the
   // variable they set.
+  if (context.kind === 'api-key') {
+    // There is no address to fund: an account is prepaid, and the only way to
+    // add credit is the portal. Naming a chain here would send someone to
+    // move USDC that this request cannot spend.
+    return ` The account is out of credit — top it up at ${PORTAL_URL}/dashboard/credits, then retry.`
+  }
   if (context.kind === 'wallet') {
-    return context.address === undefined ? '' : ` Send USDC on Base to ${context.address}, then retry.`
+    // Without the address there is still one fact worth stating: WHICH chain
+    // is short. Base USDC sent to a Solana address is gone, so a reader left
+    // to guess between two configured wallets can lose the money by guessing
+    // wrong — which is worse than the silence this used to return.
+    return context.address === undefined
+      ? ` The ${context.chain} wallet is short of funds; this route could not derive its address to tell you where to send more.`
+      : ` Send USDC on ${context.chain} to ${context.address}, then retry.`
   }
   // The catalog said this model was free and the gateway then asked to be
   // paid, so the catalog is stale — the free tier turns over fast enough for

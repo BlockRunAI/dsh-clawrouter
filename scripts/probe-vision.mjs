@@ -16,7 +16,8 @@
 //   npm run probe:vision            # only tagged models not yet in the list
 //   npm run probe:vision -- --all   # re-measure every tagged model
 //
-// Spends real USDC on paid models — roughly $0.002 per call, three calls per
+// Spends real money on paid models. On a wallet that is roughly $0.002 per
+// call, three calls per
 // model. Free models cost nothing. The estimate is printed before anything is
 // sent.
 import { randomBytes } from 'node:crypto'
@@ -29,10 +30,41 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { BlockrunAdapter } from '../src/adapter.ts'
 import { BlockrunCatalog, VERIFIED_VISION_MODELS } from '../src/catalog.ts'
+import { catalogEndpoint, DEFAULT_API_KEY_URL, DEFAULT_SOLANA_API_URL } from '../src/auth.ts'
 import { DEFAULT_API_URL } from '../src/index.ts'
 import { SpendMeter } from '../src/spend.ts'
 
-const API_URL = DEFAULT_API_URL
+/**
+ * The credential this run uses, and the host it is valid against.
+ *
+ * The order matches the plugin's: account key, then Solana, then Base. An
+ * account key is preferred for one reason specific to a probe as well — it is
+ * billed at exact usage, so measuring forty models costs a fraction of what
+ * forty flat x402 quotes do. The hosts are not interchangeable: a `brk_live_…`
+ * key on a wallet gateway is answered 402, the account host answers an
+ * unauthenticated catalog read 401, and neither chain can verify the other's
+ * signature — so the host travels with the credential.
+ * @returns {import('../src/auth.ts').BlockrunAuth | undefined} the resolved
+ *   auth, or undefined when no credential is available at all.
+ */
+function resolveProbeAuth() {
+  const account = process.env['BLOCKRUN_API_KEY']?.trim()
+  if (account !== undefined && account.length > 0) {
+    return /** @type {const} */ ({ mode: 'api-key', apiKey: account, apiUrl: DEFAULT_API_KEY_URL })
+  }
+  const solana = process.env['SOLANA_WALLET_KEY']?.trim()
+  if (solana !== undefined && solana.length > 0) {
+    return /** @type {const} */ ({ mode: 'solana-wallet', privateKey: solana, apiUrl: DEFAULT_SOLANA_API_URL })
+  }
+  const wallet = walletKey()
+  if (wallet === undefined) return undefined
+  return /** @type {const} */ ({ mode: 'wallet', privateKey: wallet, apiUrl: DEFAULT_API_URL })
+}
+
+const AUTH = resolveProbeAuth()
+const API_URL = AUTH?.apiUrl ?? DEFAULT_API_URL
+/** Headers the catalog read needs; the account host refuses an anonymous one. */
+const CATALOG_HEADERS = AUTH === undefined ? {} : (catalogEndpoint(AUTH).headers ?? {})
 
 /**
  * One `GET /v1/models` entry, in the shape this script reads.
@@ -227,7 +259,7 @@ export function taggedEntries(body) {
 
 /** Everything that touches the network or the console. */
 async function main() {
-  const response = await fetch(`${API_URL}/v1/models`)
+  const response = await fetch(`${API_URL}/v1/models`, { headers: { accept: 'application/json', ...CATALOG_HEADERS } })
   if (!response.ok) throw new Error(`catalog request failed: ${response.status}`)
   const body = await response.json()
     const entries = taggedEntries(body)
@@ -261,11 +293,20 @@ async function main() {
   }
   console.log()
 
-  // A key is needed only for the paid ones; the adapter asks for it per model,
-  // so a run over free candidates alone works on a machine with no wallet.
-  const key = walletKey()
-  if (key === undefined && paid.length > 0) {
-    console.log('No wallet key found (BASE_CHAIN_WALLET_KEY or ~/.blockrun/.session); paid models will fail.\n')
+  // A credential is needed only for the paid ones on the wallet path; the
+  // adapter asks per model, so a run over free candidates alone works on a
+  // machine with neither. On the account host even a free model needs the key,
+  // because that host answers an unauthenticated request 401 whatever it costs.
+  if (AUTH === undefined && paid.length > 0) {
+    console.log(
+      'No BlockRun credential found (BLOCKRUN_API_KEY, SOLANA_WALLET_KEY,'
+      + ' or BASE_CHAIN_WALLET_KEY / ~/.blockrun/.session);'
+      + ' paid models will fail.\n',
+    )
+  } else if (AUTH?.mode === 'api-key') {
+    console.log(`Billing to the BlockRun account via ${API_URL} — exact token usage, no per-call fee.\n`)
+  } else if (AUTH?.mode === 'solana-wallet') {
+    console.log(`Paying from a Solana wallet via ${API_URL}.\n`)
   }
 
   /** One adapter per model, so `visionModels` can admit the candidate under test. */
@@ -278,12 +319,19 @@ async function main() {
     return new BlockrunAdapter({
       provider: 'blockrun',
       connection: () => ({ apiUrl: API_URL, timeoutMs: 120_000 }),
-      resolveWalletKey: () => key === undefined
-        ? Promise.reject(new Error('no wallet key configured'))
-        : Promise.resolve(key),
+      resolveAuth: () => AUTH === undefined
+        ? Promise.reject(new Error('no BlockRun credential configured'))
+        : Promise.resolve(AUTH),
       // Widened deliberately: the point is to measure a model the default list
       // does not yet admit, and the default would refuse the image locally.
-      catalog: new BlockrunCatalog('blockrun', `${API_URL}/v1`, Date.now, [model]),
+      catalog: new BlockrunCatalog(
+        'blockrun',
+        `${API_URL}/v1`,
+        Date.now,
+        [model],
+        undefined,
+        AUTH === undefined ? undefined : async () => catalogEndpoint(AUTH),
+      ),
       resolveImage: () => Promise.resolve(`data:image/png;base64,${base64}`),
       // Carried only to read back which model actually answered. The gateway
       // substitutes silently, and a substitute that cannot see images answers a

@@ -6,13 +6,13 @@
 
 <p>DeepSeek 又快又便宜，主循环就该继续用它。<br><br>
 <strong>这个插件补的是它做不到的事：危险命令执行前，让更强的模型先审一遍。</strong><br><br>
-<em>一个钱包直调 <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个模型。不注册账号，不用 API Key，不用信用卡。</em></p>
+<em>一个凭据直调 <!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> 个模型——在 <a href="https://user.blockrun.ai">user.blockrun.ai</a> 领一把 API Key，或者不想注册就用 Solana / Base 钱包。</em></p>
 
 <br>
 
 <img src="https://img.shields.io/badge/🛡️_执行前审查-success?style=for-the-badge" alt="执行前审查">&nbsp;
 <img src="https://img.shields.io/badge/🧠_Claude_审_DeepSeek-black?style=for-the-badge" alt="Claude 审 DeepSeek">&nbsp;
-<img src="https://img.shields.io/badge/🔑_零_API_Key-blue?style=for-the-badge" alt="零 API Key">&nbsp;
+<img src="https://img.shields.io/badge/🔑_API_Key_或_钱包-blue?style=for-the-badge" alt="API Key 或钱包">&nbsp;
 <img src="https://img.shields.io/badge/💰_x402_USDC-purple?style=for-the-badge" alt="x402 USDC">
 
 [![npm version](https://img.shields.io/npm/v/dsh-clawrouter.svg?style=flat-square&color=cb3837)](https://npmjs.com/package/dsh-clawrouter)
@@ -24,6 +24,8 @@
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness_插件-4D6BFE?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 [![x402 Protocol](https://img.shields.io/badge/x402-微支付-purple?style=flat-square)](https://x402.org)
+[![领取 API Key](https://img.shields.io/badge/领取_API_Key-user.blockrun.ai-0B7285?style=flat-square)](https://user.blockrun.ai)
+[![Solana](https://img.shields.io/badge/Solana-USDC-14F195?style=flat-square&logo=solana&logoColor=black)](https://solana.com)
 [![Base](https://img.shields.io/badge/Base-USDC-0052FF?style=flat-square&logo=coinbase&logoColor=white)](https://base.org)
 [![Telegram](https://img.shields.io/badge/Telegram-社区-26A5E4?style=flat-square&logo=telegram)](https://t.me/blockrunAI)
 
@@ -31,7 +33,7 @@
 
 </div>
 
-> **dsh-clawrouter** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，把一个更强的模型放在智能体危险操作的前面。当智能体准备执行 `rm -rf ~`，审查模型会读一遍并给出放行 / 拒绝 / 交给你——由真实的工具执行器强制执行，而不是靠提示词劝阻。它同时注册一条 BlockRun provider 路由，让审查模型（以及全部 <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个模型）都能用一个钱包直接调用：不注册账号、不用 API Key，通过 [x402](https://x402.org) 用 USDC 按次付费。MIT 许可。
+> **dsh-clawrouter** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件，把一个更强的模型放在智能体危险操作的前面。当智能体准备执行 `rm -rf ~`，审查模型会读一遍并给出放行 / 拒绝 / 交给你——由真实的工具执行器强制执行，而不是靠提示词劝阻。它同时注册一条 BlockRun provider 路由，让审查模型（以及全部 <!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> 个模型）都能用**一个凭据**直接调用：在 [user.blockrun.ai](https://user.blockrun.ai) 领一把 BlockRun API Key，按真实 token 用量计费；或者不想注册任何账号，就用 Solana / Base 钱包通过 [x402](https://x402.org) 用 USDC 按次付费。MIT 许可。
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -123,7 +125,15 @@ dsh plugin --profile web add dsh-clawrouter
 /spend
 ```
 
-本进程启动以来这条路由花了多少钱——总额、分模型、token 成本与固定费用分开列。
+本进程启动以来这条路由花了多少钱——总额、分模型、token 与费用。
+
+**这个数字怎么算，取决于你用的是哪种凭据**，因为两者的计费口径是真的不一样。`/spend` 会在总额下面的那句话里说明它用的是哪一种。
+
+**用 API Key 时：** 按厂商实际报告的 token 数 × catalog 公布的每百万单价计算。这就是你账户被开票的口径——没有每次调用费、没有最低消费——所以这个数字是跟 [`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) 对得上的，而不是近似。对真实账户主机实测：`openai/gpt-5.5` 在 16 输入 / 17 输出 token 时报 `$0.000590`，也就是 `16/1M × $5 + 17/1M × $30`。catalog 没有给出单价的模型会被记为**未定价**并明确标出，绝不会悄悄按 `$0` 处理。
+
+**用钱包时：** 是网关当次给出的固定报价。同一个请求在两条链上的报价并不一样——2026-09-05 实测，Base 是 `2000` µUSDC，Solana 是 `1000`——所以 `/spend` 用的是这次调用**实际结算的那条链**的数字（`requestFeeUsd`、`solanaRequestFeeUsd`）。一段会话如果两种都用过，会报 `mixed` 并把两种口径都解释一遍。
+
+以下所有内容都是在讲**钱包**路径，那里的数字是「报价」而不是「用量」。0.11.0 之前这些数字也被用在 API Key 部署上，会把一段全是小请求的会话高估好几个数量级。
 
 **你为「请求了多少」付费，不是为「拿到了多少」付费。** 网关按请求报价——输入规模，加上你要求的 `max_tokens`——然后无论模型怎么回答，都按这个报价结算。对生产环境实测：
 
@@ -223,32 +233,87 @@ DeepSeek 没有任何视觉模型，所以这是**能力**，不是省钱。贴�
 
 但**完全不会推理的模型**是另一回事，会在**付款之前本地拒绝**：`openai/gpt-4o` 会先收钱再拒绝 `reasoning_effort`。catalog 里写明了哪些模型合格，所以这个判断不花钱。
 
-### 7. 一个钱包，<!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个模型
+### 7. 一个凭据，<!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> 个模型
 
-注册一条 `blockrun` provider 路由。认证方式是**钱包签名**而不是 API Key：每次请求通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。
+注册一条 `blockrun` provider 路由，覆盖 BlockRun 提供的全部模型。这一点在 DeepSeek 覆盖不到的模型上最有价值——Claude、GPT、Gemini、Grok，而这恰恰是「审查」需要的。
 
-这一点在 DeepSeek 覆盖不到的模型上最有价值——Claude、GPT、Gemini、Grok，而这恰恰是「审查」需要的。
+付费方式有三种，三选一。它们不是同一扇门的三个把手：主机不同、计费方式不同、钱花完时的报错也不同。
 
-其中 <!-- br:models.free -->7<!-- /br:models.free --> 个是**免费的，连钱包都不需要**：网关对 `billing_mode: "free"` 的模型直接返回 `200`，根本不会走 x402 握手，所以这条路由发这类请求时不会向你要密钥。这份名单是从 catalog 实时读取的，没有写死在这里——它变动的速度远快于本插件发版。
+| | **API Key**（推荐） | **Solana 钱包** | **Base 钱包** |
+|---|---|---|---|
+| 凭据 | [user.blockrun.ai](https://user.blockrun.ai) 签发的 `brk_live_…` | bs58 编码的 Solana 私钥 | 一把 EVM 私钥 |
+| 主机 | `api.blockrun.ai` | `sol.blockrun.ai/api` | `blockrun.ai/api` |
+| 计费 | 按真实 token 用量 × 公开价目表，**无每次调用费、无最低消费** | 每次请求一个固定报价，本地签名后上链结算（x402） | 同上，在 Base 上 |
+| 充值 | 在后台用信用卡或电汇 | 往自己的地址转 Solana 链 SPL USDC | 往自己的地址转 Base 链 USDC |
+| 消费记录在哪 | 账户账本 `user.blockrun.ai/dashboard` | 钱包余额本身 | 钱包余额本身 |
+| 是否需要注册 | Google 登录 | 完全不需要 | 完全不需要 |
+| 配置项 | `apiKeyEnv` | `solanaWalletKeyEnv` | `walletKeyEnv` |
+
+**检查顺序就是上面这个顺序。** API Key 优先，因为那是你**特意**选的凭据——如果反过来去动一个你只是碰巧导出过的钱包，那就是拿你的钱付了一笔你本打算记在账户上的调用。**Solana 排在 Base 前面**：两个钱包都配了，说明的是这个部署**能**在哪些链上付款，而不是它更想用哪条；这条路由选 Solana。两个网关提供的模型目录完全一致，已逐个 id 核对过。
+
+多加一个凭据不会影响现有部署：三个都不设，你的配置就什么都没变。
+
+走 Solana 需要 `@solana/web3.js` 和 `@solana/spl-token`。它们是**可选** peer 依赖，所以 API Key 或只用 Base 的部署不会背上它们：
+
+```sh
+npm install @solana/web3.js @solana/spl-token
+```
+
+其中 <!-- br:models.free -->7<!-- /br:models.free --> 个模型在三条路径上都是免费的。在两个钱包网关上它们**连凭据都不需要**：网关对 `billing_mode: "free"` 的模型直接返回 `200`，根本不会走 x402 握手。在 `api.blockrun.ai` 上仍然要带 Key，因为那台主机对未认证请求一律返回 `401`，不管模型收不收费。这份名单是从 catalog 实时读取的，没有写死在这里——它变动的速度远快于本插件发版。
 
 ## 快速开始
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
-export BASE_CHAIN_WALLET_KEY=0x...   # 也可以存进 credentials 服务
+export BLOCKRUN_API_KEY=brk_live_...   # 也可以存进 credentials 服务
 ```
 
 **安装时会打印六条 `✕ missing peer`，这是正常的。** 这些包由 harness 在运行时提供，所有第一方 bundle 也都是这么声明 peer 的——反过来直接依赖它们，会让 profile 里出现第二份 cordis，那种坏法要难查得多。已在全新环境实测：profile 正常组装，`dsh --profile web --dump-config` 能列出两行配置。什么都不缺。
 
-**这个 key 从哪来？** 没有 API key 可粘贴——认证方式就是钱包签名。
+### 领一把 API Key
 
-- **用过 BlockRun 的其他工具？** 那你已经有钱包了。SDK 存在 `~/.blockrun/.session`，ClawRouter 存在 `~/.openclaw/blockrun/wallet.key`。哪个存在就导出哪个：`export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
+这是最短的一条路；除非你明确不想开账号，否则就走这条。
+
+1. 打开 **[user.blockrun.ai](https://user.blockrun.ai)**，用 Google 登录。账户创建出来就是预付费、余额为 0 的——注册本身不花钱。
+2. 在 **[user.blockrun.ai/dashboard/credits](https://user.blockrun.ai/dashboard/credits)** 充值——信用卡结账，金额较大可以走电汇。
+3. 在 **[user.blockrun.ai/dashboard/keys](https://user.blockrun.ai/dashboard/keys)** 签发一把 Key。明文只显示一次，当场复制。
+4. `export BLOCKRUN_API_KEY=brk_live_...`
+
+这样换来的是：**按真实 token 用量精确计费，没有每次调用费，也没有最低消费**，并且每一次调用都会写进你的账户账本——[`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) 上能看到每次调用的 request id、模型、token 数和金额，所以 `/spend` 和账单可以互相对账。
+
+余额为 0 的 Key 仍然能调免费模型；任何收费模型会以 `PAYMENT_REQUIRED` 失败，并把你指向充值页面。
+
+### 或者：用钱包，完全不开账号
+
+BlockRun 也接受钱包签名，通过 x402 用 USDC 按次付费。不注册、不 KYC、不绑卡、不用给每家厂商都开一个账号。支持两条链，本路由优先 Solana。
+
+**Solana**
+
+```sh
+npm install @solana/web3.js @solana/spl-token   # 可选 peer，只有这条路径需要
+export SOLANA_WALLET_KEY=...                    # bs58 私钥
+```
+
+SDK 把 Solana 钱包存在 `~/.blockrun/.solana-session`；没有的话 `npx -y @blockrun/clawrouter` 会生成一个并打印地址。往这个地址转 Solana 链上的 SPL USDC。
+
+**Base**
+
+- **用过 BlockRun 的其他工具？** 那你已经有 Base 钱包了。SDK 存在 `~/.blockrun/.session`，ClawRouter 存在 `~/.openclaw/blockrun/wallet.key`。哪个存在就导出哪个：`export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
 - **还没有钱包？** `npx -y @blockrun/clawrouter` 会生成一个并打印地址。记下地址后停掉它，往这个地址转几美元 USDC（Base 链），然后导出私钥。
-- **只想先试试？** catalog 里标记为 `free` 的那 <!-- br:models.free -->7<!-- /br:models.free --> 个模型完全不需要钱包。网关对它们返回 `200`、从不发起 x402 握手，所以 `dsh-clawrouter` 在发送之前不会去要密钥。选 `nvidia/nemotron-3.5-lightning` 或 `cohere/north-mini-code`，什么都不导出就能跑通。其余所有模型在你设置密钥之前仍然会以 `MISSING_CREDENTIAL` 失败——这个豁免是**按模型**判定的、从 catalog 读出来的，不是整体放宽。
 
-本插件**不会自己去读**这两个文件。一个「用户没配置过、却悄悄盖住了他真正配置的那个」的凭据，正是 harness 凭据机制要防的事——所以它只读你指定的那个引用。
+**别转错链。** 这是两条曲线上的两把不同的密钥，USDC 转到另一条链的地址上就没了——这也是为什么本路由的付费失败提示里，永远会把**链名**和地址一起写出来。
 
-Base 链上 5 美元的 USDC，够跑约 **2,500** 次闸门审查（它们都落在 $0.002 的下限上）——也只够约 **5** 次带 10 万 token 上下文的 Opus 调用。同样是 5 美元；请按你**实际打算怎么用**这条路由来充值，而不是按它的下限。配置里写的是**引用**（`walletKeyEnv`）而不是密钥本身，并且每次请求实时解析——换密钥下一次调用即生效，任何密钥都不会进入配置文件。
+Base 链上 5 美元的 USDC，够跑约 **2,500** 次闸门审查（它们都落在 $0.002 的下限上）——也只够约 **5** 次带 10 万 token 上下文的 Opus 调用。同样是 5 美元；请按你**实际打算怎么用**这条路由来充值，而不是按它的下限。
+
+### 或者：两个都不要
+
+catalog 里标记为 `free` 的那 <!-- br:models.free -->7<!-- /br:models.free --> 个模型，在两个钱包网关上都完全不需要任何凭据。网关对它们返回 `200`、从不发起 x402 握手，所以 `dsh-clawrouter` 在发送之前不会去要密钥。选 `nvidia/nemotron-3.5-lightning` 或 `cohere/north-mini-code`，什么都不导出就能跑通。其余所有模型在你设置凭据之前仍然会以 `MISSING_CREDENTIAL` 失败——这个豁免是**按模型**判定的、从 catalog 读出来的，不是整体放宽。
+
+### 关于凭据本身
+
+本插件**不会自己去读**任何密钥文件。一个「用户没配置过、却悄悄盖住了他真正配置的那个」的凭据，正是 harness 凭据机制要防的事——所以它只读你指定的那个引用。
+
+配置里写的三个都是**引用**（`apiKeyEnv`、`solanaWalletKeyEnv`、`walletKeyEnv`）而不是密钥本身，并且每次请求实时解析——换密钥下一次调用即生效，任何密钥都不会进入配置文件。
 
 ## 配置项
 
@@ -257,11 +322,16 @@ Base 链上 5 美元的 USDC，够跑约 **2,500** 次闸门审查（它们都�
 | 配置 | 默认值 | 含义 |
 |---|---|---|
 | `provider` | `blockrun` | 注册的路由名 |
-| `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | 存放 EVM 钱包私钥的凭据**引用** |
-| `apiUrl` | `https://blockrun.ai/api` | API 根地址 |
+| `apiKeyEnv` | `BLOCKRUN_API_KEY` | 存放 BlockRun 账户 Key（`brk_live_…`）的凭据**引用**——**最优先** |
+| `solanaWalletKeyEnv` | `SOLANA_WALLET_KEY` | 存放 bs58 Solana 私钥的凭据**引用**——**排在 Base 之前** |
+| `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | 存放 EVM 钱包私钥的凭据**引用**，仅在前两个都没有时使用 |
+| `apiKeyUrl` | `https://api.blockrun.ai` | API Key 认证所对应的账户 API 根地址 |
+| `solanaApiUrl` | `https://sol.blockrun.ai/api` | Solana 钱包付费所走的 x402 网关根地址 |
+| `apiUrl` | `https://blockrun.ai/api` | Base 钱包付费所走的 x402 网关根地址 |
 | `timeoutMs` | `300000` | 单次请求超时 |
 | `auxiliaryModel` | *(关闭)* | Harness 自身维护调用所用的模型——见下 |
-| `requestFeeUsd` | `0.002` | 每次请求的固定费用，`/spend` 会用到——取网关实际报价，见下 |
+| `requestFeeUsd` | `0.002` | **Base 钱包路径**上每次请求的固定费用，`/spend` 会用到——取网关实际报价，见下 |
+| `solanaRequestFeeUsd` | `0.001` | **Solana 钱包路径**上的同一个数字，网关的报价不一样。API Key 按 token 计费，两个都不看。 |
 
 ### 把 compaction 的开销降下来
 
@@ -303,17 +373,23 @@ Harness 会通过「总结」来压缩长会话，而它用的是**当前对话�
 
 - **只有实测不接受图片的模型才会拒绝图片**——`visionModels` 是真正对着一张图答对了的集合，光有 `vision` 标签不够：有好几个带标签的模型会先收钱再失败。目前排除 6 个，见第 5 节。（这一条以前写的是「图片会被明确拒绝，视觉能力在计划中」，旁边还有一条说推理档位同样被拒绝。两个能力都在 0.10.0 就发布了，而这两条说明又活了三个版本——而且恰恰活在读者专门用来查「什么不能用」的那一节里。）
 - **中断请求会立刻停止投递，但底层 HTTP 请求本身还取消不了**——要等 `@blockrun/llm` 支持 `AbortSignal`，目前连接会在 SDK 自己的超时后关闭。
-- **本插件不记录自己花了多少钱。** Harness 的会话日志会拒绝它不认识的事件类型，而仓库外的插件无法把自己的事件标记为可忽略，所以它不写任何会话事件。它也不会写进 `~/.blockrun/cost_log.jsonl`：那个账本是 `@blockrun/llm` 的 `LLMClient` 写的，而本适配器用的流式客户端只在内存里累计。目前请直接看钱包余额——这条说明的早先版本指向了那个账本，那会让你看到的是**其他工具**的花费，而不是本插件的。
+- **本插件不保存持久的消费记录。** `/spend` 只活在进程的生命周期里。Harness 的会话日志会拒绝它不认识的事件类型，而仓库外的插件无法把自己的事件标记为可忽略，所以它不写任何会话事件。它也不会写进 `~/.blockrun/cost_log.jsonl`：那个账本是 `@blockrun/llm` 的 `LLMClient` 写的，而本适配器用的流式客户端只在内存里累计。用 API Key 时持久记录在 BlockRun 那边——每次调用都会落到 [`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) 背后的账户账本，带 request id、模型、token 数和金额。用钱包时，钱包余额本身就是那份记录。
+- **插件这一侧读不到余额，也读不到用量。** `api.blockrun.ai` 对外只有 `/v1/chat/completions`、`/v1/messages` 和模型目录；`/v1/usage`、`/v1/balance` 这类端点都是 `404`。所以 `/spend` 没法显示你的剩余额度，账户余额耗尽只会在下一次调用时以指向充值页面的 `PAYMENT_REQUIRED` 暴露出来，不会提前预警。
+- **Solana 需要两个可选 peer 依赖。** `@solana/web3.js` 和 `@solana/spl-token` 是**可选** peer 而不是普通依赖，因为 `@solana/spl-token` 会拉进 `bigint-buffer`，它的原生 `toBigIntLE()` 有一个至今没有修复版本的缓冲区溢出。设成可选，是为了不让每一个用 API Key 或只用 Base 的部署都在 lockfile 里背上它。走 Solana 请自行安装；没装就发 Solana 请求会直接报错并点名这两个包。
+- **响应里的 `model` 字段不一定等于你请求的那个 id，也不一定是被顶替了。** OpenAI 系的模型会回显厂商带版本号的 id——请求 `openai/gpt-5.5` 回来的是 `gpt-5.5-2026-04-23`，`anthropic/claude-sonnet-4-6` 回来的是 `anthropic/claude-sonnet-4.6`。`/spend` 的「被顶替」那一行会把它当成换了模型。这只是显示问题，而且早于 API Key 这条路径——两台主机上实测一致——但确实会让这行提示在没有发生任何顶替时也出现。
 - **智能路由（`blockrun/auto`）尚未接入**，缺的不是路由器。虚拟模型必须报告**一个**上下文窗口，而 Harness 用它来决定何时压缩：报最大的，某一轮路由到小模型时会直接溢出且压缩永不触发；报最小的，所有会话都会过早压缩。在这个问题有诚实答案之前，请直接指定模型 id —— `auxiliaryModel` 已经把真正花钱的维护调用挪走了，省钱的部分本来就在那里。
 - **压缩可能比需要的时机更早触发。** 本路由报告的是网关模型目录里声明的上下文窗口。对着真实网关实测：`openai/gpt-4.1-nano` 接受了 **450,037** token 的输入，并正确复述了第一行的标记——没有截断，但这是目录声明的 128,000 的 3.5 倍。Harness 是按声明值来决定何时压缩的，所以会话可能在模型其实还吃得下的时候就压缩了。已向上游反馈；本插件如实报告目录的值而不是往高了猜——猜高了就是拿「提前压缩」换「静默溢出」。
 - **上下文溢出是靠请求大小判定的，不是靠错误文案。** 真实溢出从网关返回的是 `{"message":"API request failed"}`——厂商原始文案被清洗掉了，常规的文本检测器什么都匹配不到。所以在收到 400 之后，如果请求本身已经超过该模型声明的窗口，就按溢出处理，好让压缩能够恢复。文本检测器仍然优先，所以网关哪天不再清洗，这里会自动回到正轨。
-- **上一轮的 reasoning 不会回传。** DeepSeek 的思考模式文档要求在带 tool call 的轮次回传 `reasoning_content`，但这一条路由要服务 <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> 个来自不同厂商的模型——某一家要求的字段，另一家可能直接拒绝。所以推理模型配合多步工具调用时效果可能略有下降，遇到了请反馈。
+- **上一轮的 reasoning 不会回传。** DeepSeek 的思考模式文档要求在带 tool call 的轮次回传 `reasoning_content`，但这一条路由要服务 <!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> 个来自不同厂商的模型——某一家要求的字段，另一家可能直接拒绝。所以推理模型配合多步工具调用时效果可能略有下降，遇到了请反馈。
 
 ## 开发
 
 ```sh
-npm test          # 398 个离线测试，含两套走真实 cordis Loader 的组合测试
-npm run test:e2e  # 真实网关测试——会花掉真实 USDC（约 $0.02）；没有钱包时自动跳过
+npm test          # 离线测试，含走真实 cordis Loader 的组合测试
+npm run test:e2e  # 真实网关测试，三套互相独立、绝不互相顶替：
+                  # Base 钱包（花真实 USDC，约 $0.02）、Solana 钱包（SOLANA_WALLET_KEY
+                  # 或 ~/.blockrun/.solana-session）、账户主机（BLOCKRUN_API_KEY）。
+                  # 各自缺凭据就各自跳过。
 npm run sync:models  # 从实时 catalog 刷新两份 README 里的模型数量和免费模型数
 npm run probe:vision # 实测哪些带 vision 标签的模型真的能接受图片；直接打印可粘贴的名单
 npm run test:docker  # 在干净容器里安装**已发布**的包，验证它能组装起来
@@ -321,7 +397,7 @@ npm run test:docker  # 在干净容器里安装**已发布**的包，验证它�
 
 用**本地 link** 开发时（`dsh plugin add /path/to/dsh-clawrouter`），本包的 **devDependencies** 会被带进 profile，于是出现两份 `@deepseek-ai/dsh-llm`。跨这两份做 `instanceof LlmError` 会失败，harness 就会把所有失败都显示成 `UNKNOWN`，而不是真实错误码。要验证错误码，请用 `npm pack` 出来的 tarball 安装，而不是 link。
 
-只有这套 live 测试会真正走一遍 x402 握手：签名本身就是认证，任何 mock 都替代不了。它被刻意排除在 `npm test` 之外，不会被误跑。
+只有这几套 live 测试会真正走一遍 x402 握手（签名本身就是认证，任何 mock 都替代不了），而且 Solana 是另一条曲线上的另一种签名，Base 那套证明的东西一点都带不过去。也只有它们能证明 API Key 确实打到了账户主机、并且是按账户开票的口径计费的。它被刻意排除在 `npm test` 之外，不会被误跑。
 
 ## 更新日志
 

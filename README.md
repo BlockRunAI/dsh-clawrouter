@@ -6,13 +6,13 @@
 
 <p>DeepSeek is fast and cheap — keep it for the loop.<br><br>
 <strong>This adds what it cannot do: a stronger model reviews the dangerous command before it runs.</strong><br><br>
-<em><!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models from one wallet. No accounts. No API keys. No credit card.</em></p>
+<em><!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> models from one credential — an API key from <a href="https://user.blockrun.ai">user.blockrun.ai</a>, or a Solana or Base wallet if you would rather not sign up.</em></p>
 
 <br>
 
 <img src="https://img.shields.io/badge/🛡️_Review_Before_Execute-success?style=for-the-badge" alt="Review before execute">&nbsp;
 <img src="https://img.shields.io/badge/🧠_Claude_Reviews_DeepSeek-black?style=for-the-badge" alt="Claude reviews DeepSeek">&nbsp;
-<img src="https://img.shields.io/badge/🔑_Zero_API_Keys-blue?style=for-the-badge" alt="No API keys">&nbsp;
+<img src="https://img.shields.io/badge/🔑_API_Key_or_Wallet-blue?style=for-the-badge" alt="API key or wallet">&nbsp;
 <img src="https://img.shields.io/badge/💰_x402_USDC-purple?style=for-the-badge" alt="x402 USDC">
 
 [![npm version](https://img.shields.io/npm/v/dsh-clawrouter.svg?style=flat-square&color=cb3837)](https://npmjs.com/package/dsh-clawrouter)
@@ -24,6 +24,8 @@
 
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness_Plugin-4D6BFE?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 [![x402 Protocol](https://img.shields.io/badge/x402-Micropayments-purple?style=flat-square)](https://x402.org)
+[![Get an API key](https://img.shields.io/badge/Get_an_API_key-user.blockrun.ai-0B7285?style=flat-square)](https://user.blockrun.ai)
+[![Solana](https://img.shields.io/badge/Solana-USDC-14F195?style=flat-square&logo=solana&logoColor=black)](https://solana.com)
 [![Base](https://img.shields.io/badge/Base-USDC-0052FF?style=flat-square&logo=coinbase&logoColor=white)](https://base.org)
 [![Telegram](https://img.shields.io/badge/Telegram-Community-26A5E4?style=flat-square&logo=telegram)](https://t.me/blockrunAI)
 
@@ -31,7 +33,7 @@ English | [中文](https://github.com/BlockRunAI/dsh-clawrouter/blob/main/docs/R
 
 </div>
 
-> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models) is reachable from one wallet with no accounts and no API keys, paid per request in USDC over [x402](https://x402.org). MIT licensed.
+> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> models) is reachable from **one credential**: a BlockRun API key from [user.blockrun.ai](https://user.blockrun.ai), billed at exact token usage — or, if you would rather not sign up for anything, a Solana or Base wallet paying per request in USDC over [x402](https://x402.org). MIT licensed.
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -129,7 +131,15 @@ Not every dangerous action is a shell command. Writing `.git/hooks/pre-commit`, 
 /spend
 ```
 
-What this route has cost since the process started — total, per model, tokens and flat fees separately.
+What this route has cost since the process started — total, per model, tokens and fees.
+
+**How the figure is computed depends on which credential you are on**, because the two are billed on genuinely different arithmetic. `/spend` says which one it used, in the sentence under the total.
+
+**On an API key:** priced from the tokens the provider reported, at the catalog's published per-million rates. That is the same basis your account is invoiced on — no per-call fee, no minimum — so the figure lines up with [`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) rather than approximating it. Measured against the live account host: `openai/gpt-5.5` on 16 input / 17 output tokens reports `$0.000590`, which is `16/1M × $5 + 17/1M × $30`. A model the catalog publishes no rate for is counted as **unpriced** and named as such, never silently as `$0`.
+
+**On a wallet:** the flat quote the gateway gave, per call. The two chains are quoted differently for the same request — measured 2026-09-05, `2000` µUSDC on Base against `1000` on Solana — so `/spend` uses the figure for the chain the call actually settled on (`requestFeeUsd`, `solanaRequestFeeUsd`). A session that used both reports `mixed` and explains both.
+
+Everything below this line describes the **wallet** path, whose numbers are quotes rather than usage. Before 0.11.0 those numbers were reported for API-key deployments too, which overstated a session of small calls by orders of magnitude.
 
 **You pay for what you request, not what you get.** The gateway quotes from the request — input size plus the `max_tokens` you ask for — and settles that quoted amount whichever way the model answers. Measured against production:
 
@@ -229,32 +239,87 @@ Reasoning models get `high` and `max`, declared per model from the catalog's `re
 
 Asking a model that does not reason at all is a different case, and is refused **locally, before paying**: `openai/gpt-4o` charges and then rejects `reasoning_effort` outright. The catalog says which models qualify, so that costs nothing to discover.
 
-### 7. <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models from one wallet
+### 7. <!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> models from one credential
 
-Registers a `blockrun` provider route. Authentication is a **wallet signature**, not an API key: each request is paid per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account.
+Registers a `blockrun` provider route reaching every model BlockRun serves. That matters most for the ones DeepSeek does not — Claude, GPT, Gemini, Grok — which is exactly what a reviewer needs.
 
-That matters most for models DeepSeek does not serve — Claude, GPT, Gemini, Grok — which is exactly what a reviewer needs.
+There are three ways to pay for it, and you pick one. They are not three doors onto the same thing: different host, different billing, different failure when the money runs out.
 
-<!-- br:models.free -->7<!-- /br:models.free --> of them are free and need no wallet either: the gateway serves a `billing_mode: "free"` model unpaid, so this route sends one without asking for a key. The list is read live from the catalog rather than pinned here, because it changes faster than this plugin releases.
+| | **API key** *(recommended)* | **Solana wallet** | **Base wallet** |
+|---|---|---|---|
+| Credential | `brk_live_…` from [user.blockrun.ai](https://user.blockrun.ai) | a bs58 Solana secret key | an EVM private key |
+| Host | `api.blockrun.ai` | `sol.blockrun.ai/api` | `blockrun.ai/api` |
+| Billed | exact token usage against the published price sheet — **no per-call fee, no minimum** | a flat quote per request, signed and settled on chain over x402 | the same, on Base |
+| Top up | card or wire, in the portal | send SPL USDC to your own address | send Base USDC to your own address |
+| Where the spend shows up | your account ledger at `user.blockrun.ai/dashboard` | the wallet balance itself | the wallet balance itself |
+| Signup | Google sign-in | none at all | none at all |
+| Config key | `apiKeyEnv` | `solanaWalletKeyEnv` | `walletKeyEnv` |
+
+**They are checked in that order.** The API key wins because it is the credential you chose on purpose — paying from a wallet you merely happen to have exported would spend money on a call you meant to put on the account. **Solana is checked before Base:** a deployment holding both wallets has said which chains it *can* pay on, not which it prefers, and this route picks Solana. Both gateways serve the same catalog, verified id for id.
+
+Adding a credential does not disturb an existing deployment: set none of the three and nothing about your setup changes.
+
+Paying on Solana needs `@solana/web3.js` and `@solana/spl-token`. They are optional peer dependencies, so an API-key or Base-only deployment does not carry them:
+
+```sh
+npm install @solana/web3.js @solana/spl-token
+```
+
+<!-- br:models.free -->7<!-- /br:models.free --> models are free on every path. On either wallet gateway they need no credential at all — both serve a `billing_mode: "free"` model unpaid, so this route sends one without asking for a key. On `api.blockrun.ai` the key is still sent, because that host answers an unauthenticated request `401` whatever the model costs. The list is read live from the catalog rather than pinned here, because it changes faster than this plugin releases.
 
 ## Quick Start
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
-export BASE_CHAIN_WALLET_KEY=0x...   # or store it via the credentials service
+export BLOCKRUN_API_KEY=brk_live_...   # or store it via the credentials service
 ```
 
 **The install prints `✕ missing peer` for six harness packages. That is expected.** The harness itself supplies them at runtime, and every first-party bundle declares its peers the same way — the alternative, depending on them directly, gives the profile a second copy of cordis and breaks the plugin in ways that are much harder to read. Verified on a clean install: the profile composes and `dsh --profile web --dump-config` lists both rows. Nothing is missing.
 
-**Where does the key come from?** There is no API key to paste — authentication is a wallet signature.
+### Getting an API key
 
-- **Already run a BlockRun tool?** You have a wallet already. The SDK keeps it at `~/.blockrun/.session`, ClawRouter at `~/.openclaw/blockrun/wallet.key`. Export whichever exists: `export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
+This is the shortest path, and the one to take unless you specifically want to avoid an account.
+
+1. Go to **[user.blockrun.ai](https://user.blockrun.ai)** and sign in with Google. The account is created prepaid with zero credit — registration itself costs nothing.
+2. Add credit at **[user.blockrun.ai/dashboard/credits](https://user.blockrun.ai/dashboard/credits)** — card checkout, or wire for larger amounts.
+3. Issue a key at **[user.blockrun.ai/dashboard/keys](https://user.blockrun.ai/dashboard/keys)**. The plaintext is shown once; copy it then.
+4. `export BLOCKRUN_API_KEY=brk_live_...`
+
+What you get for it: **exact token billing with no per-call fee and no minimum**, and every call written to your account ledger — [`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) shows request id, model, tokens and cost per call, so `/spend` and the invoice can be reconciled against each other.
+
+A key with no credit on it still reaches the free models; anything with a price fails `PAYMENT_REQUIRED` pointing at the top-up page.
+
+### Or: a wallet, with no account at all
+
+BlockRun also takes a wallet signature and pays per call in USDC over x402. No signup, no KYC, no credit card, no per-lab account. Two chains, and this route prefers Solana.
+
+**Solana**
+
+```sh
+npm install @solana/web3.js @solana/spl-token   # optional peers, needed only for this path
+export SOLANA_WALLET_KEY=...                    # bs58 secret key
+```
+
+The SDK keeps a Solana wallet at `~/.blockrun/.solana-session`; `npx -y @blockrun/clawrouter` generates one and prints its address if you have none. Send it SPL USDC on Solana.
+
+**Base**
+
+- **Already run a BlockRun tool?** You have a Base wallet already. The SDK keeps it at `~/.blockrun/.session`, ClawRouter at `~/.openclaw/blockrun/wallet.key`. Export whichever exists: `export BASE_CHAIN_WALLET_KEY=$(cat ~/.blockrun/.session)`
 - **No wallet yet?** `npx -y @blockrun/clawrouter` generates one and prints its address. Stop it once you have the address, send it a few USDC on Base, then export the key.
-- **Just want to try it?** The <!-- br:models.free -->7<!-- /br:models.free --> models the catalog bills as `free` need no wallet at all. The gateway answers them with `200` and never opens the x402 handshake, so `dsh-clawrouter` does not ask for a key before sending one. Pick `nvidia/nemotron-3.5-lightning` or `cohere/north-mini-code` and it works with nothing exported. Every other model still fails with `MISSING_CREDENTIAL` until you set the key — the exemption is per model, read from the catalog, not a general loosening.
 
-This plugin reads neither file on its own. A credential nobody configured, quietly shadowing the one they did, is exactly what the harness credentials seam exists to prevent — so it only ever reads the reference you name.
+Send the right chain's USDC to the right address. They are different keys on different curves, and USDC sent to the wrong one is gone — which is why a payment failure on this route always names the chain along with the address.
 
-$5 of USDC on Base covers about **2,500** gate reviews, which run at the $0.002 floor — and about **5** calls carrying a 100K-token context on Opus. Both figures are the same $5; fund for the way you intend to use the route rather than for its floor. The key is a **reference** in configuration (`walletKeyEnv`), resolved per request — rotating it takes effect on the very next call, and no secret enters a config file.
+$5 of USDC on Base covers about **2,500** gate reviews, which run at the $0.002 floor — and about **5** calls carrying a 100K-token context on Opus. Both figures are the same $5; fund for the way you intend to use the route rather than for its floor.
+
+### Or: neither
+
+The <!-- br:models.free -->7<!-- /br:models.free --> models the catalog bills as `free` need no credential at all on either wallet gateway. Both answer them with `200` and never open the x402 handshake, so `dsh-clawrouter` does not ask for a key before sending one. Pick `nvidia/nemotron-3.5-lightning` or `cohere/north-mini-code` and it works with nothing exported. Every other model still fails with `MISSING_CREDENTIAL` until you set a credential — the exemption is per model, read from the catalog, not a general loosening.
+
+### About the credential itself
+
+This plugin reads no key file on its own. A credential nobody configured, quietly shadowing the one they did, is exactly what the harness credentials seam exists to prevent — so it only ever reads the reference you name.
+
+All three keys are **references** in configuration (`apiKeyEnv`, `solanaWalletKeyEnv`, `walletKeyEnv`), resolved per request — rotating either takes effect on the very next call, and no secret enters a config file.
 
 ## Configuration
 
@@ -263,11 +328,16 @@ $5 of USDC on Base covers about **2,500** gate reviews, which run at the $0.002 
 | Key | Default | Meaning |
 |---|---|---|
 | `provider` | `blockrun` | harness route key to register |
-| `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | credential *reference* holding the EVM wallet key |
-| `apiUrl` | `https://blockrun.ai/api` | API root |
+| `apiKeyEnv` | `BLOCKRUN_API_KEY` | credential *reference* holding the BlockRun account key (`brk_live_…`) — **checked first** |
+| `solanaWalletKeyEnv` | `SOLANA_WALLET_KEY` | credential *reference* holding the bs58 Solana secret key — **checked before Base** |
+| `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | credential *reference* holding the EVM wallet key, used when neither of the above resolves |
+| `apiKeyUrl` | `https://api.blockrun.ai` | account API root an API key authenticates against |
+| `solanaApiUrl` | `https://sol.blockrun.ai/api` | x402 gateway root a Solana wallet pays |
+| `apiUrl` | `https://blockrun.ai/api` | x402 gateway root a Base wallet pays |
 | `timeoutMs` | `300000` | per-request timeout |
 | `auxiliaryModel` | *(off)* | model for the harness's own maintenance calls — see below |
-| `requestFeeUsd` | `0.002` | flat per-request fee, used by `/spend` — the quoted figure, see below |
+| `requestFeeUsd` | `0.002` | flat per-request fee on the **Base** wallet path, used by `/spend` — the quoted figure, see below |
+| `solanaRequestFeeUsd` | `0.001` | the same figure for the **Solana** wallet path, which the gateway quotes differently. An API key is billed per token instead and ignores both. |
 
 ### Cutting compaction cost
 
@@ -309,17 +379,23 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 
 - **An image is refused for a model measured not to accept one** — `visionModels` is the set that answered a real image correctly, and the `vision` tag alone is not enough, since several tagged models charge and then fail. Six are excluded; see section 5. (This bullet used to read "images are refused, vision is planned", beside another saying reasoning effort was refused too. Both shipped in 0.10.0 and both bullets outlived them by three releases, describing a plugin that no longer exists — in the section a reader consults precisely to find out what does not work.)
 - **An aborted request stops delivery immediately, but the in-flight HTTP request is not itself cancelled** until `@blockrun/llm` accepts an `AbortSignal`; the socket closes on the SDK's own timeout.
-- **This plugin does not record what it spends.** Harness session logs refuse event types a build does not know, and an out-of-repo plugin cannot mark its events ignorable, so it writes no session events. It also does not reach `~/.blockrun/cost_log.jsonl`: that ledger is written by `@blockrun/llm`'s `LLMClient`, and the streaming client this adapter uses tracks its spend in memory only. Check the wallet itself for now — an earlier version of this note pointed at the ledger, which would have shown you other tools' spending rather than this one's.
+- **This plugin keeps no durable record of what it spends.** `/spend` lives in memory for the life of the process. Harness session logs refuse event types a build does not know, and an out-of-repo plugin cannot mark its events ignorable, so it writes no session events. It also does not reach `~/.blockrun/cost_log.jsonl`: that ledger is written by `@blockrun/llm`'s `LLMClient`, and the streaming client this adapter uses tracks its spend in memory only. On an API key the durable record is BlockRun's own — every call lands on the account ledger behind [`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity), with request id, model, tokens and cost. On a wallet, the wallet balance is the record.
+- **There is no balance or usage endpoint to read from the plugin.** `api.blockrun.ai` publishes `/v1/chat/completions`, `/v1/messages` and the model catalogs; `/v1/usage`, `/v1/balance` and friends are `404`. So `/spend` cannot show your remaining credit, and an exhausted account is discovered by a `PAYMENT_REQUIRED` that points at the top-up page rather than by a warning beforehand.
+- **Solana needs two optional peer dependencies.** `@solana/web3.js` and `@solana/spl-token` are optional peers rather than dependencies, because `@solana/spl-token` pulls in `bigint-buffer`, whose native `toBigIntLE()` has an unpatched buffer overflow with no fixed release anywhere. Making them optional keeps that out of the lockfile of every API-key and Base-only deployment. Install them yourself for the Solana path; a Solana request without them fails naming the packages.
+- **The `model` a response reports is not always the id you asked for, and not always a substitution.** OpenAI-family models echo the vendor-versioned id — a request for `openai/gpt-5.5` comes back as `gpt-5.5-2026-04-23`, and `anthropic/claude-sonnet-4-6` as `anthropic/claude-sonnet-4.6`. `/spend`'s substitution line reads those as a different model answering. It is cosmetic and it predates the API-key path — measured identical on both hosts — but it does mean the line can appear when nothing was actually substituted.
 - **Smart routing (`blockrun/auto`) is not wired up**, and not for lack of a router. A virtual model has to report one context window, and the harness sizes compaction from it: report the largest candidate and a turn routed to a smaller model overflows with compaction never firing; report the smallest and every session compacts far too early. Until that has an honest answer, pin a model id — `auxiliaryModel` already moves the expensive maintenance calls, which is where the savings actually were.
 - **Compaction may fire earlier than it needs to.** This route reports the context window the gateway's model catalog declares. Measured against the live gateway, `openai/gpt-4.1-nano` accepted a 450,037-token prompt and recalled a marker from the very first line — no truncation, but 3.5x the 128,000 the catalog states. The harness sizes compaction from the declared figure, so a session can compact while the model would still have taken the whole thing. Reported upstream; this plugin reports what the catalog says rather than guessing higher, because over-claiming would trade early compaction for silent overflow.
 - **Context overflow is detected by request size, not by the error text.** A real overflow comes back from the gateway as `{"message":"API request failed"}` — the provider's wording is sanitized away, so the usual text detectors match nothing. After a 400, a request larger than the model's declared window is therefore treated as an overflow so compaction can recover. The text detectors still run first, so this corrects itself if the gateway stops sanitizing.
-- **Prior-turn reasoning is not sent back.** DeepSeek's thinking-mode guide says `reasoning_content` should be returned on tool-call turns, but this one route serves <!-- br:models.chatVisible -->73<!-- /br:models.chatVisible --> models from many vendors, and a field one of them requires is a field another may reject. Multi-step tool use on a reasoning model may be slightly degraded as a result; please report it if you hit it.
+- **Prior-turn reasoning is not sent back.** DeepSeek's thinking-mode guide says `reasoning_content` should be returned on tool-call turns, but this one route serves <!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> models from many vendors, and a field one of them requires is a field another may reject. Multi-step tool use on a reasoning model may be slightly degraded as a result; please report it if you hit it.
 
 ## Development
 
 ```sh
-npm test          # 398 offline tests, including two real-cordis-Loader compositions
-npm run test:e2e  # live gateway tests — spends real USDC (~$0.02); skips without a wallet
+npm test          # offline tests, including real-cordis-Loader compositions
+npm run test:e2e  # live tests, three independent suites that never fall back to each other:
+                  # Base wallet (real USDC, ~$0.02), Solana wallet (SOLANA_WALLET_KEY or
+                  # ~/.blockrun/.solana-session), and the account host (BLOCKRUN_API_KEY).
+                  # Each skips when its own credential is absent.
 npm run sync:models  # refresh the model and free-tier counts in both READMEs from the live catalog
 npm run probe:vision # measure which vision-tagged models really accept an image; prints the list to paste
 npm run test:docker  # install the PUBLISHED package in a clean container and assert it composes
@@ -327,7 +403,7 @@ npm run test:docker  # install the PUBLISHED package in a clean container and as
 
 Developing against a linked checkout (`dsh plugin add /path/to/dsh-clawrouter`) pulls this package's **devDependencies** into the profile, giving a second copy of `@deepseek-ai/dsh-llm`. `instanceof LlmError` then fails across the two copies and the harness reports every failure as `UNKNOWN` instead of its real code. Test error codes from a packed tarball (`npm pack`) rather than a link.
 
-The live suite is the only thing that exercises the x402 handshake, because the signature *is* the authentication and no mock can stand in for it. It is deliberately excluded from `npm test` so it never runs by accident.
+The live suites are the only thing that exercises the x402 handshakes, because the signature *is* the authentication and no mock can stand in for it — and Solana's is a different signature on a different curve, so nothing the Base suite proves carries over. They are also the only thing that proves an API key reaches the account host and is billed the way the account is invoiced. It is deliberately excluded from `npm test` so it never runs by accident.
 
 ## Changelog
 

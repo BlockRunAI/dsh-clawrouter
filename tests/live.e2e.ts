@@ -6,6 +6,13 @@
 // Real USDC is spent (a fraction of a cent per run). Self-skips when no wallet
 // is available, so `vitest run` on a machine without one is still green.
 //
+// The account path is exercised separately at the bottom of this file, against
+// api.blockrun.ai with a `brk_live_…` key from BLOCKRUN_API_KEY. It spends real
+// account credit and skips when no key is exported. The two are kept apart on
+// purpose: they are different hosts with different billing, and a suite that
+// silently fell back from one to the other would report a green run for a path
+// it never touched.
+//
 // Run with:  npx vitest run tests/live.e2e.ts
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -15,6 +22,9 @@ import { describe, expect, it } from 'vitest'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { BlockrunAdapter } from '../src/adapter.ts'
+import { catalogEndpoint, requestFeeFor } from '../src/auth.ts'
+import type { AuthResolver } from '../src/auth.ts'
+import { SpendMeter } from '../src/spend.ts'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { BlockrunCatalog, projectCatalog, projectFreeModels } from '../src/catalog.ts'
 import { buildReviewPrompt, matchRisk, parseVerdict, REVIEW_SYSTEM_PROMPT } from '../src/reviewer.ts'
@@ -47,12 +57,47 @@ function walletKey(): string | undefined {
 const KEY = walletKey()
 const live = KEY === undefined ? describe.skip : describe
 
+/**
+ * The Solana wallet key, from the environment or the local session file.
+ *
+ * A separate file from the Base one because they are separate keys on
+ * separate curves: `~/.blockrun/.session` holds an EVM key and
+ * `~/.blockrun/.solana-session` an ed25519 one, and neither can sign for the
+ * other's chain.
+ */
+function solanaWalletKey(): string | undefined {
+  const fromEnv = process.env['SOLANA_WALLET_KEY']
+  if (fromEnv !== undefined && fromEnv.trim().length > 0) return fromEnv.trim()
+  try {
+    const raw = readFileSync(join(homedir(), '.blockrun', '.solana-session'), 'utf8').trim()
+    if (raw.startsWith('{')) {
+      const parsed: unknown = JSON.parse(raw)
+      const record = parsed as Record<string, unknown>
+      const value = record['privateKey'] ?? record['key'] ?? record['secretKey']
+      return typeof value === 'string' ? value.trim() : undefined
+    }
+    return raw.length > 0 ? raw : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const SOLANA_KEY = solanaWalletKey()
+const liveSolana = SOLANA_KEY === undefined ? describe.skip : describe
+
+/** The account key, when one is exported; never read from a file. */
+const ACCOUNT_KEY = (() => {
+  const value = process.env['BLOCKRUN_API_KEY']?.trim()
+  return value !== undefined && value.length > 0 ? value : undefined
+})()
+const liveAccount = ACCOUNT_KEY === undefined ? describe.skip : describe
+
 /** An adapter wired to the real gateway. */
 function adapter(): BlockrunAdapter {
   return new BlockrunAdapter({
     provider: 'blockrun',
     connection: () => ({ apiUrl: API_URL, timeoutMs: 120_000 }),
-    resolveWalletKey: () => Promise.resolve(KEY!),
+    resolveAuth: () => Promise.resolve({ mode: 'wallet', privateKey: KEY!, apiUrl: API_URL }),
     catalog: new BlockrunCatalog('blockrun', `${API_URL}/v1`),
     // Stands in for the attachment service: these tests exercise the wire
     // format, not the harness's attachment storage.
@@ -263,7 +308,7 @@ live('an unfunded wallet, against the real gateway', () => {
     const broke = new BlockrunAdapter({
       provider: 'blockrun',
       connection: () => ({ apiUrl: API_URL, timeoutMs: 60_000 }),
-      resolveWalletKey: () => Promise.resolve(empty),
+      resolveAuth: () => Promise.resolve({ mode: 'wallet', privateKey: empty, apiUrl: API_URL }),
       catalog: new BlockrunCatalog('blockrun', `${API_URL}/v1`),
     })
     let failure: { code?: string; message?: string } = {}
@@ -336,4 +381,210 @@ live('vision', () => {
       .join('')
     expect(answer.toLowerCase()).toContain('red')
   }, 120_000)
+})
+
+liveAccount('live account host (spends real account credit)', () => {
+  // api.blockrun.ai is a different host with a different billing model, not a
+  // second door onto the same one: it authenticates with a bearer token, never
+  // opens a 402 handshake, and invoices the account at ACTUAL token usage with
+  // no per-call minimum and no per-call fee. Everything below was measured
+  // against it before being asserted.
+  const ACCOUNT_URL = 'https://api.blockrun.ai'
+
+  /** An adapter wired to the account host, and the catalog it can actually read. */
+  function accountAdapter(meter?: SpendMeter): BlockrunAdapter {
+    const resolveAuth: AuthResolver = () =>
+      Promise.resolve({ mode: 'api-key', apiKey: ACCOUNT_KEY!, apiUrl: ACCOUNT_URL })
+    return new BlockrunAdapter({
+      provider: 'blockrun',
+      connection: () => ({ apiUrl: ACCOUNT_URL, timeoutMs: 120_000 }),
+      resolveAuth,
+      catalog: new BlockrunCatalog(
+        'blockrun',
+        `${ACCOUNT_URL}/v1`,
+        Date.now,
+        undefined,
+        undefined,
+        async () => catalogEndpoint(await resolveAuth({ free: true })),
+      ),
+      ...meter === undefined ? {} : { meter },
+      resolveImage: async () => `data:image/png;base64,${RED_8x8}`,
+    })
+  }
+
+  /** Drive one real account-billed request to completion. */
+  async function collectOn(
+    instance: BlockrunAdapter,
+    model: string,
+    text: string,
+    maxTokens = 32,
+  ): Promise<StreamChunk[]> {
+    const chunks: StreamChunk[] = []
+    for await (const chunk of instance.stream({
+      provider: 'blockrun', model, maxTokens,
+      messages: [createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })],
+    } as never) as AsyncIterable<StreamChunk>) {
+      chunks.push(chunk)
+    }
+    return chunks
+  }
+
+  it('lists the catalog, which the account host refuses to serve anonymously', async () => {
+    // Measured: GET https://api.blockrun.ai/v1/models without a bearer token
+    // is 401. An anonymous read would leave this deployment with no models.
+    const models = await accountAdapter().listModels('blockrun')
+    expect(models.length).toBeGreaterThan(50)
+    expect(models.map(model => model.id)).toContain('deepseek/deepseek-chat')
+  }, 120_000)
+
+  it('completes a paid request with no x402 handshake at all', async () => {
+    const chunks = await collectOn(accountAdapter(), 'deepseek/deepseek-chat', 'Reply with exactly: PONG')
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+    expect(textOf(chunks)).toContain('PONG')
+  }, 180_000)
+
+  it('serves a free model too — but only because the key was sent', async () => {
+    // The wallet path's "free needs no credential" shortcut does not carry
+    // over: this host answers an unauthenticated request 401 whatever the
+    // model costs.
+    const chunks = await collectOn(accountAdapter(), 'nvidia/nemotron-3.5-lightning', 'Say hi', 16)
+    expect(chunks.at(-1)?.type).toBe('finish')
+  }, 180_000)
+
+  it('prices the session from tokens, not at the per-request fee', async () => {
+    const meter = new SpendMeter(0.002)
+    await collectOn(accountAdapter(meter), 'deepseek/deepseek-chat', 'Reply with exactly: OK', 8)
+    const summary = meter.summary()
+    expect(summary.basis).toBe('per-token')
+    expect(summary.calls).toBe(1)
+    // A single short call on a cheap model costs a tiny fraction of the
+    // wallet path's flat $0.002 quote. Asserting the ORDER of magnitude
+    // rather than a figure keeps this from breaking on a price change while
+    // still failing loudly if the flat fee ever leaks back in.
+    expect(summary.totalUsd).toBeGreaterThan(0)
+    expect(summary.totalUsd).toBeLessThan(0.0002)
+  }, 180_000)
+
+  it('rejects a key the account host does not know, as an auth failure', async () => {
+    const wrong = new BlockrunAdapter({
+      provider: 'blockrun',
+      connection: () => ({ apiUrl: ACCOUNT_URL, timeoutMs: 60_000 }),
+      resolveAuth: () => Promise.resolve({ mode: 'api-key', apiKey: 'brk_live_not_a_real_key', apiUrl: ACCOUNT_URL }),
+      catalog: new BlockrunCatalog('blockrun', `${API_URL}/v1`),
+    })
+    let code: string | undefined
+    try {
+      await collectOn(wrong, 'deepseek/deepseek-chat', 'hi', 8)
+    } catch (error) {
+      code = (error as { failure?: { code?: string } }).failure?.code
+    }
+    // AUTH, not PAYMENT_REQUIRED: no amount of credit fixes a key the host
+    // does not recognise, so retrying or topping up is the wrong advice.
+    expect(code).toBe('AUTH')
+  }, 120_000)
+})
+
+liveSolana('live Solana gateway (spends real SPL USDC)', () => {
+  // The Solana x402 handshake is a different signature on a different curve
+  // settling on a different chain, so nothing the Base suite proves carries
+  // over. It runs only when a Solana wallet is available, and never falls back
+  // to the Base one — a suite that quietly tested the other chain would report
+  // green for a path it never touched.
+  const SOLANA_URL = 'https://sol.blockrun.ai/api'
+
+  /** An adapter wired to the real Solana gateway. */
+  function solanaAdapter(meter?: SpendMeter): BlockrunAdapter {
+    const resolveAuth: AuthResolver = () =>
+      Promise.resolve({ mode: 'solana-wallet', privateKey: SOLANA_KEY!, apiUrl: SOLANA_URL })
+    return new BlockrunAdapter({
+      provider: 'blockrun',
+      connection: () => ({ apiUrl: SOLANA_URL, timeoutMs: 120_000 }),
+      resolveAuth,
+      catalog: new BlockrunCatalog(
+        'blockrun',
+        `${SOLANA_URL}/v1`,
+        Date.now,
+        undefined,
+        undefined,
+        async () => catalogEndpoint(await resolveAuth({ free: false })),
+      ),
+      ...meter === undefined ? {} : { meter },
+      requestFee: auth => requestFeeFor(auth),
+    })
+  }
+
+  /** Drive one real Solana request to completion. */
+  async function collectOnSolana(
+    instance: BlockrunAdapter,
+    model: string,
+    text: string,
+    maxTokens = 32,
+  ): Promise<StreamChunk[]> {
+    const chunks: StreamChunk[] = []
+    for await (const chunk of instance.stream({
+      provider: 'blockrun', model, maxTokens,
+      messages: [createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })],
+    } as never) as AsyncIterable<StreamChunk>) {
+      chunks.push(chunk)
+    }
+    return chunks
+  }
+
+  it('serves the same catalog the Base gateway does', async () => {
+    // Verified id for id on 2026-09-05. It matters because a model pinned in a
+    // profile must not stop existing because a deployment changed chains.
+    const models = await solanaAdapter().listModels('blockrun')
+    expect(models.length).toBeGreaterThan(50)
+    expect(models.map(model => model.id)).toContain('deepseek/deepseek-chat')
+  }, 120_000)
+
+  it('streams a free model with no payment at all', async () => {
+    const chunks = await collectOnSolana(solanaAdapter(), 'nvidia/nemotron-3.5-lightning', 'Say hi', 16)
+    expect(chunks.at(-1)?.type).toBe('finish')
+  }, 180_000)
+
+  it('completes a paid request through the Solana x402 handshake', async () => {
+    // 402 -> sign an SPL TransferChecked authorization locally -> replay ->
+    // stream. Reaching a terminal `stop` means the whole round trip settled;
+    // an unpaid or badly signed request never streams.
+    const chunks = await collectOnSolana(solanaAdapter(), 'deepseek/deepseek-chat', 'Reply with exactly: PONG')
+    const finish = chunks.at(-1)
+    expect(finish?.type).toBe('finish')
+    expect(finish?.type === 'finish' && finish.reason.kind).toBe('stop')
+    expect(textOf(chunks)).toContain('PONG')
+  }, 180_000)
+
+  it('meters that call at the quote Solana gives, not the one Base gives', async () => {
+    const meter = new SpendMeter(0.002)
+    await collectOnSolana(solanaAdapter(meter), 'deepseek/deepseek-chat', 'Reply with exactly: OK', 8)
+    const summary = meter.summary()
+    expect(summary.basis).toBe('per-request')
+    // Measured: the same request quotes 2000 µUSDC on Base and 1000 on Solana.
+    expect(summary.totalUsd).toBeCloseTo(0.001, 10)
+  }, 180_000)
+
+  it('names Solana, not Base, when the wallet cannot pay', async () => {
+    // A fresh keypair is a valid Solana wallet with no balance. Costs nothing:
+    // a rejected payment is not charged, and the key never leaves this test.
+    const { Keypair } = await import('@solana/web3.js')
+    const bs58 = await import('bs58')
+    const empty = (bs58.default ?? bs58).encode(Keypair.generate().secretKey)
+    const broke = new BlockrunAdapter({
+      provider: 'blockrun',
+      connection: () => ({ apiUrl: SOLANA_URL, timeoutMs: 60_000 }),
+      resolveAuth: () => Promise.resolve({ mode: 'solana-wallet', privateKey: empty, apiUrl: SOLANA_URL }),
+      catalog: new BlockrunCatalog('blockrun', `${SOLANA_URL}/v1`),
+    })
+    let failure: { code?: string; message?: string } = {}
+    try {
+      await collectOnSolana(broke, 'deepseek/deepseek-chat', 'hi', 8)
+    } catch (error) {
+      const code = (error as { failure?: { code?: string } }).failure?.code
+      failure = { ...code === undefined ? {} : { code }, message: (error as Error).message }
+    }
+    expect(failure.code).toBe('PAYMENT_REQUIRED')
+    // Base USDC sent to a Solana address is gone. Naming the wrong chain here
+    // is not a cosmetic slip, it is how someone loses the money.
+    expect(failure.message).toMatch(/Send USDC on Solana to [1-9A-HJ-NP-Za-km-z]{32,44}/)
+  }, 180_000)
 })

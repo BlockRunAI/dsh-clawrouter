@@ -199,7 +199,25 @@ const CHAT_CATEGORY = 'chat'
  */
 const FREE_BILLING_MODE = 'free'
 
+/** Where a catalog read goes, and what it must carry to be answered. */
+export interface CatalogEndpoint {
+  /** Gateway `/v1` base, e.g. `https://api.blockrun.ai/v1`. */
+  baseURL: string
+  /** Extra request headers; an API-key deployment sends its bearer token here. */
+  headers?: Record<string, string>
+}
+
 interface CacheEntry {
+  /**
+   * The `/v1` base this listing came from.
+   *
+   * Cached alongside the models because the base is not fixed for the life of
+   * the plugin: a deployment that gains an API key starts reading the
+   * account's own catalog on `api.blockrun.ai` instead of the wallet gateway's
+   * anonymous one, and serving the old host's listing from cache would price
+   * the next call from a sheet the account is not billed against.
+   */
+  baseURL: string
   models: readonly LlmResolvedModelInfo[]
   /** Published per-million rates by model id; absent for a model the catalog does not price. */
   rates: ReadonlyMap<string, ModelRates>
@@ -215,8 +233,16 @@ export class BlockrunCatalog {
 
   /**
    * @param provider - harness route key stamped onto every entry.
-   * @param baseURL - gateway base, e.g. `https://blockrun.ai/api/v1`.
+   * @param baseURL - gateway base, e.g. `https://blockrun.ai/api/v1`. Used when
+   *   no endpoint resolver is supplied, or when the resolver has nothing to say.
    * @param now - clock, injected so cache expiry is testable.
+   * @param visionModels - ids this route may send images to.
+   * @param maxOutputCeiling - ceiling on a model's default output cap.
+   * @param resolveEndpoint - reads the base and headers the CURRENT credential
+   *   can list against. An API-key deployment must read the account's own
+   *   catalog: `api.blockrun.ai/v1/models` answers `401` unauthenticated, and
+   *   it is the listing whose prices `/spend` bills from. Omitted keeps the
+   *   anonymous read of `baseURL`, which is what a wallet deployment wants.
    */
   constructor(
     private readonly provider: string,
@@ -224,6 +250,7 @@ export class BlockrunCatalog {
     private readonly now: () => number = Date.now,
     private readonly visionModels: readonly string[] = VERIFIED_VISION_MODELS,
     private readonly maxOutputCeiling: number = DEFAULT_MAX_TOKENS_CEILING,
+    private readonly resolveEndpoint?: () => Promise<CatalogEndpoint>,
   ) {}
 
   /** Published rates from the last successful read, by model id. */
@@ -265,14 +292,22 @@ export class BlockrunCatalog {
    * @throws LlmError when no catalog has ever been read and the fetch fails.
    */
   async list(signal?: AbortSignal): Promise<readonly LlmResolvedModelInfo[]> {
+    // Resolved before the cache is consulted, because it is half the cache
+    // key: a listing read anonymously from the wallet gateway is not an answer
+    // to "what can this API key call, and at what price".
+    const endpoint = await this.#endpoint()
     const cached = this.#cache
-    if (cached !== undefined && this.now() - cached.fetchedAt < CATALOG_TTL_MS) return cached.models
+    if (
+      cached !== undefined
+      && cached.baseURL === endpoint.baseURL
+      && this.now() - cached.fetchedAt < CATALOG_TTL_MS
+    ) return cached.models
     // The shared fetch deliberately carries NO caller signal. One request is
     // reused by every concurrent caller, so binding it to whichever caller
     // happened to arrive first would let that caller's cancellation fail
     // everyone else's read. Its own deadline bounds it instead; a caller that
     // cancels stops waiting below without disturbing the request.
-    this.#inFlight ??= this.#refresh().finally(() => {
+    this.#inFlight ??= this.#refresh(endpoint).finally(() => {
       this.#inFlight = undefined
     })
     const inFlight = this.#inFlight
@@ -285,8 +320,10 @@ export class BlockrunCatalog {
       // Serve the previous catalog through a transient gateway failure: a
       // selector that listed 70 models a minute ago must not empty because one
       // refresh timed out. With nothing cached there is no honest answer, so
-      // the failure surfaces.
-      if (cached !== undefined) return cached.models
+      // the failure surfaces. A listing from a DIFFERENT host is not a stale
+      // answer to this question, it is an answer to another one — so it is not
+      // served here.
+      if (cached !== undefined && cached.baseURL === endpoint.baseURL) return cached.models
       throw error
     }
   }
@@ -329,22 +366,45 @@ export class BlockrunCatalog {
       throw new LlmError(
         `BlockRun does not serve model "${model}" on provider route "${this.provider}".`
         + (suggestions.length > 0 ? ` Did you mean ${suggestions.map(id => `"${id}"`).join(', ')}?` : '')
-        + ` The full list is at ${this.baseURL.replace(/\/$/, '')}/models.`,
+        + ` The full list is at ${(this.#cache?.baseURL ?? this.baseURL).replace(/\/$/, '')}/models.`,
         'UNKNOWN_MODEL',
       )
     }
     return found
   }
 
-  async #refresh(): Promise<readonly LlmResolvedModelInfo[]> {
-    const url = `${this.baseURL.replace(/\/$/, '')}/models`
+  /**
+   * The base and headers the current credential lists against.
+   *
+   * A resolver failure falls back to the configured base rather than failing
+   * the read: the catalog is what a selector shows and what a typo is checked
+   * against, and losing it because a credential lookup blipped is a worse
+   * outcome than listing the public gateway's models.
+   */
+  async #endpoint(): Promise<CatalogEndpoint> {
+    const fallback: CatalogEndpoint = { baseURL: this.baseURL }
+    if (this.resolveEndpoint === undefined) return fallback
+    try {
+      const resolved = await this.resolveEndpoint()
+      return resolved.baseURL.length > 0 ? resolved : fallback
+    } catch {
+      return fallback
+    }
+  }
+
+  async #refresh(endpoint: CatalogEndpoint): Promise<readonly LlmResolvedModelInfo[]> {
+    const base = endpoint.baseURL.replace(/\/$/, '')
+    const url = `${base}/models`
     // This request answers every concurrent caller, so it owns its own
     // deadline: without one, a hung gateway would park the shared promise
     // indefinitely and every later caller would join the same stall.
     const deadline = AbortSignal.timeout(CATALOG_FETCH_TIMEOUT_MS)
     let response: Response
     try {
-      response = await fetch(url, { headers: { accept: 'application/json' }, signal: deadline })
+      response = await fetch(url, {
+        headers: { accept: 'application/json', ...endpoint.headers },
+        signal: deadline,
+      })
     } catch (error) {
       throw new LlmError(`BlockRun model catalog request failed (${url})`, 'TRANSPORT', { cause: error })
     }
@@ -357,7 +417,13 @@ export class BlockrunCatalog {
     }
     const body: unknown = await response.json()
     const models = projectCatalog(this.provider, body, this.visionModels, this.maxOutputCeiling)
-    this.#cache = { models, rates: projectRates(body), freeModels: projectFreeModels(body), fetchedAt: this.now() }
+    this.#cache = {
+      baseURL: base,
+      models,
+      rates: projectRates(body),
+      freeModels: projectFreeModels(body),
+      fetchedAt: this.now(),
+    }
     return models
   }
 }

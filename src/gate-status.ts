@@ -93,7 +93,7 @@ export function renderGateStatus(status: GateStatus): string {
  *
  * Both stages are reported separately because they fail for unrelated reasons:
  * a rule that no longer matches is a policy problem, and a reviewer that
- * cannot be reached is a wallet or model problem.
+ * cannot be reached is a credential or model problem.
  *
  * @param result - What the drill observed.
  * @returns Text for the command surface.
@@ -122,7 +122,8 @@ export function renderDrill(result: DrillResult): string {
     result.ruling === 'dangerous'
       ? 'End to end: this command would have been denied before running.'
       : result.ruling === undefined
-        ? 'The matcher works; the reviewer does not. Check reviewerModel and your wallet.'
+        ? 'The matcher works; the reviewer does not. Check reviewerModel, and the credential the route runs on'
+          + ' — an API key (BLOCKRUN_API_KEY) with credit on it, or a funded wallet.'
         : `The reviewer did not call this dangerous. That is worth investigating before relying on the gate.`,
   )
   return lines.join('\n')
