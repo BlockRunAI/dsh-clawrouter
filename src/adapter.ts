@@ -41,7 +41,7 @@ import type {
   LlmResolvedModelInfo,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
-import { PORTAL_URL } from './auth.ts'
+import { accountFingerprint, PORTAL_URL } from './auth.ts'
 import type { AuthResolver, BlockrunAuth } from './auth.ts'
 import { BlockrunCatalog, suggestModels, toModelInfo } from './catalog.ts'
 import { httpErrorCode } from './http-error.ts'
@@ -257,7 +257,9 @@ export class BlockrunAdapter extends LlmAdapter {
     // that answers the first request. Usage is recorded from the terminal
     // flush, by which point the SDK has booked what it signed.
     const pricing = (): CallPricing => {
-      if (auth.mode === 'api-key') return { kind: 'per-token', ...ratesFor(this.#options.catalog, model) }
+      if (auth.mode === 'api-key') {
+        return { kind: 'per-token', ...ratesFor(this.#options.catalog, model), account: accountFingerprint(auth.apiKey) }
+      }
       const signedUsd = signedAmount(client)
       return {
         kind: 'per-request',

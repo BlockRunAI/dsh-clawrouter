@@ -44,8 +44,8 @@
  * @module dsh-clawrouter/auth
  */
 
-import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { createHash, randomBytes } from 'node:crypto'
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -146,9 +146,19 @@ function expandHome(path: string): string {
 /**
  * Save an account key where every BlockRun product on the machine looks.
  *
- * Written `0600` in a `0700` directory: it is a bearer credential for the
- * reader's money. The mode is passed to the write rather than applied after
- * it, so the file is never briefly world-readable.
+ * Written `0600`: it is a bearer credential for the reader's money.
+ *
+ * The key goes into a NEW file created exclusively with that mode, which is
+ * then renamed over the destination. Writing the destination in place is not
+ * enough: `writeFile`'s `mode` applies only when it creates the file, so
+ * logging in over an existing `0644` key file kept `0644` and left the new
+ * key readable by every local user while this route said otherwise. Renaming
+ * a fresh file replaces the old inode and its permissions together, and a
+ * crash mid-write leaves the previous key intact rather than a truncated one.
+ *
+ * A directory this creates is `0700`. An existing one is left as it is — it
+ * may be shared with other tools — but the file inside it is owner-only
+ * either way, which is what keeps the key unreadable.
  * @param key - the key to save.
  * @param path - destination, `~`-prefixed or absolute.
  * @returns the path as given, for the confirmation line.
@@ -161,8 +171,33 @@ export async function saveApiKey(key: string, path: string = DEFAULT_API_KEY_FIL
   }
   const resolved = expandHome(path)
   await mkdir(dirname(resolved), { recursive: true, mode: 0o700 })
-  await writeFile(resolved, `${trimmed}\n`, { mode: 0o600 })
+  const staging = `${resolved}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
+  try {
+    // `wx`: fail rather than reuse a file someone else created at this name.
+    await writeFile(staging, `${trimmed}\n`, { mode: 0o600, flag: 'wx' })
+    // The umask can only remove bits, so this is already 0600; set it anyway
+    // so the guarantee does not rest on that.
+    await chmod(staging, 0o600)
+    await rename(staging, resolved)
+  } catch (error) {
+    await rm(staging, { force: true })
+    throw error
+  }
   return path
+}
+
+/**
+ * A stable, non-reversible label for one account key.
+ *
+ * Lets the meter keep each key's calls apart without holding the key itself:
+ * a process that switched accounts with `/blockrun login` must compare each
+ * account's ledger against that account's calls, not against everything it
+ * ever sent.
+ * @param key - the account key.
+ * @returns 16 hex characters of its SHA-256.
+ */
+export function accountFingerprint(key: string): string {
+  return createHash('sha256').update(key.trim()).digest('hex').slice(0, 16)
 }
 
 /**

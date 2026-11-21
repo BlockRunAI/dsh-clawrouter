@@ -149,7 +149,16 @@ export type CallPricing =
    * @remarks `rates` absent means the catalog published none for this model,
    * which is counted as unpriced rather than as free.
    */
-  | { readonly kind: 'per-token'; readonly rates?: ModelRates }
+  | {
+    readonly kind: 'per-token'
+    readonly rates?: ModelRates
+    /**
+     * Which account was billed, as {@link accountFingerprint} labels it.
+     * Absent counts under one unnamed account, which is what an older caller
+     * gets.
+     */
+    readonly account?: string
+  }
 
 /** The wallet path's scheme, and the default for every caller that names none. */
 const PER_REQUEST: CallPricing = { kind: 'per-request' }
@@ -177,6 +186,12 @@ export interface SpendSummary {
   /** Their cost as this process priced them; unpriced calls are in the count and not in this. */
   accountUsd: number
   /**
+   * The same two figures per account, keyed by fingerprint (`''` for calls
+   * that named none). Kept because a ledger is per account: a process that
+   * switched keys must not compare one account's ledger with another's calls.
+   */
+  byAccount: Record<string, { calls: number; usd: number }>
+  /**
    * Wallet calls whose cost is the configured per-request figure rather than
    * the amount signed. Zero means every wallet figure in this summary is what
    * was actually authorized.
@@ -194,6 +209,7 @@ export interface SpendSummary {
 /** Accumulates what one provider route has been charged. */
 export class SpendMeter {
   readonly #models = new Map<string, Tally>()
+  readonly #accounts = new Map<string, { calls: number; usd: number }>()
 
   /** @param requestPriceUsd - what one request costs on this deployment. */
   constructor(private readonly requestPriceUsd: number) {}
@@ -268,17 +284,32 @@ export class SpendMeter {
         }
       } else if (pricing.rates === undefined) {
         entry.tokenCalls += 1
+        this.#account(pricing.account).calls += 1
         // Counted, never guessed. Zero would read as free and any invented
         // rate would read as fact.
         entry.unpricedCalls = (entry.unpricedCalls ?? 0) + 1
       } else {
-        entry.tokenCalls += 1
-        entry.tokenCostUsd += (input / 1e6) * (pricing.rates.input ?? 0)
+        const cost = (input / 1e6) * (pricing.rates.input ?? 0)
           + (usage.outputTokens / 1e6) * (pricing.rates.output ?? 0)
+        entry.tokenCalls += 1
+        entry.tokenCostUsd += cost
+        const account = this.#account(pricing.account)
+        account.calls += 1
+        account.usd += cost
       }
     }
     entry.costUsd = entry.flatCostUsd + entry.tokenCostUsd
     this.#models.set(model, entry)
+  }
+
+  /** The running totals for one account, created on first use. */
+  #account(id: string | undefined): { calls: number; usd: number } {
+    const key = id ?? ''
+    const found = this.#accounts.get(key)
+    if (found !== undefined) return found
+    const created = { calls: 0, usd: 0 }
+    this.#accounts.set(key, created)
+    return created
   }
 
   /**
@@ -313,6 +344,7 @@ export class SpendMeter {
       estimatedCalls: tallies.reduce((sum, entry) => sum + entry.estimatedCalls, 0),
       accountCalls: tallies.reduce((sum, entry) => sum + entry.tokenCalls, 0),
       accountUsd: tallies.reduce((sum, entry) => sum + entry.tokenCostUsd, 0),
+      byAccount: Object.fromEntries([...this.#accounts].map(([id, totals]) => [id, { ...totals }])),
       inputTokens: byModel.reduce((sum, entry) => sum + entry.inputTokens, 0),
       outputTokens: byModel.reduce((sum, entry) => sum + entry.outputTokens, 0),
       // Summed from the rows rather than from the call count, so the total and

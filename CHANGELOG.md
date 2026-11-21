@@ -4,6 +4,15 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## 0.13.1 — 2026-11-21
+
+Three fixes to the `/blockrun` commands 0.13.0 added, all found by an independent Codex review before 0.13.0 reached npm. Each has a test that fails on 0.13.0.
+
+### Fixed
+- **`/blockrun login` over an existing key file kept that file's permissions.** `writeFile`'s mode applies only when it creates a file, so logging in over a `0644` key file left the new key readable by every user on the machine — while the command said it was readable by you only. The key is now written to a fresh file created owner-only and renamed over the old one, so the permissions are replaced with the contents; a failed write leaves the previous key untouched and nothing behind.
+- **After switching accounts, `/spend` compared one account's ledger with another's calls.** Ten calls on account A and one on B compared B's one-call ledger with all eleven and reported the ledger as behind. Account-billed calls are now counted per key (by a hash, never the key), the comparison uses only the current key's calls, and calls on other keys are named as left out.
+- **`/blockrun` described a wallet fallback that does not happen.** With a saved key file that is unreadable or does not hold a key, every paid request fails `INVALID_CREDENTIAL` — the wallet is deliberately not used — but status swallowed that error and reported the wallet. It now reports the broken file as blocking, and `/spend` says why paid calls fail.
+
 ## 0.13.0 — 2026-11-21
 
 ### Added

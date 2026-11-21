@@ -355,6 +355,30 @@ describe('account billing is priced from tokens, not from a per-request quote', 
 })
 
 
+describe('account-billed calls are kept apart per key', () => {
+  it('totals each account separately and all of them together', () => {
+    const meter = new SpendMeter(0.002)
+    const rates = { input: 1, output: 2 }
+    meter.record('m', usage(1_000_000, 0), false, undefined, { kind: 'per-token', rates, account: 'a' })
+    meter.record('m', usage(1_000_000, 0), false, undefined, { kind: 'per-token', rates, account: 'a' })
+    meter.record('m', usage(0, 1_000_000), false, undefined, { kind: 'per-token', rates, account: 'b' })
+    meter.record('m', usage(5, 5), false, undefined, { kind: 'per-token', account: 'b' })
+    const summary = meter.summary()
+    expect(summary.byAccount['a']).toEqual({ calls: 2, usd: 2 })
+    // The unpriced call is counted, never priced.
+    expect(summary.byAccount['b']).toEqual({ calls: 2, usd: 2 })
+    expect(summary.accountCalls).toBe(4)
+    expect(summary.accountUsd).toBeCloseTo(4, 10)
+  })
+
+  it('leaves wallet and free calls out of every account', () => {
+    const meter = new SpendMeter(0.002)
+    meter.record('m', usage(10, 10))
+    meter.record('m', usage(10, 10), true, undefined, { kind: 'per-token', account: 'a' })
+    expect(meter.summary().byAccount).toEqual({})
+  })
+})
+
 describe('a signed amount is exact, and is said to be', () => {
   it('prices the call at what was signed and stays quiet about floors', () => {
     const meter = new SpendMeter(0.002)

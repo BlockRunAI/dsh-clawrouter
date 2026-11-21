@@ -23,6 +23,7 @@ import { BlockrunAdapter } from './adapter.ts'
 import type { BlockrunConnection } from './adapter.ts'
 import {
   API_KEY_PATTERN,
+  accountFingerprint,
   catalogEndpoint,
   checkApiKey,
   clearSavedApiKeys,
@@ -449,8 +450,10 @@ export function apply(ctx: Context, config: Config): void {
     let account
     try {
       account = await accountKey()
-    } catch {
-      return []
+    } catch (error) {
+      // Said here rather than dropped: the next paid request will fail on it,
+      // and /spend is where someone looks to find out why.
+      return ['', `The configured BlockRun account key cannot be used, so paid requests fail: ${credentialProblem(error)}`]
     }
     if (account === undefined) return []
     const [check, ledger] = await Promise.all([
@@ -467,9 +470,13 @@ export function apply(ctx: Context, config: Config): void {
         ? `Credit could not be read just now; see ${PORTAL_URL}/dashboard/credits.`
         : `Account credit: ${formatCreditBalance(check.balance)}. Top up at ${PORTAL_URL}/dashboard/credits.`,
     )
-    if (ledger !== undefined) lines.push(...ledgerLines(ledger, meter.summary()))
+    if (ledger !== undefined) lines.push(...ledgerLines(ledger, meter.summary(), accountFingerprint(account.key)))
     return lines
   }
+
+  /** A credential failure's own message, without the plugin prefix it already carries. */
+  const credentialProblem = (error: unknown): string =>
+    (error instanceof Error ? error.message : String(error)).replace(/^dsh-clawrouter: /, '')
 
   /**
    * The account ledger beside this process's own count, for the same window.
@@ -480,19 +487,31 @@ export function apply(ctx: Context, config: Config): void {
    * ledger running ahead is expected when the key is also in use elsewhere,
    * and is the thing to look at when it is not.
    */
-  const ledgerLines = (ledger: LedgerSummary, local: SpendSummary): string[] => {
+  const ledgerLines = (ledger: LedgerSummary, summary: SpendSummary, account: string): string[] => {
     const money = (value: number): string => `$${value.toFixed(value > 0 && value < 0.01 ? 6 : 4)}`
+    // Only this account's calls. A ledger is per account, and a process that
+    // switched keys with /blockrun login has calls on more than one — comparing
+    // the current account's ledger with all of them reports a lag that is not
+    // there.
+    const local = summary.byAccount[account] ?? { calls: 0, usd: 0 }
+    const elsewhere = summary.accountCalls - local.calls
     const lines = [
       `Account ledger since this process started: ${money(ledger.usd)} across ${ledger.calls} call${ledger.calls === 1 ? '' : 's'}`
-      + ` — this process recorded ${money(local.accountUsd)} across ${local.accountCalls}.`,
+      + ` — this process recorded ${money(local.usd)} across ${local.calls} on this key.`,
     ]
-    if (ledger.calls > local.accountCalls) {
+    if (ledger.calls > local.calls) {
       lines.push(
-        `  ${ledger.calls - local.accountCalls} of those were not made here: expected if this key is also used on another`
+        `  ${ledger.calls - local.calls} of those were not made here: expected if this key is also used on another`
         + ' machine or by another BlockRun tool, and worth a look at the dashboard if it is not.',
       )
-    } else if (ledger.calls < local.accountCalls) {
+    } else if (ledger.calls < local.calls) {
       lines.push('  The ledger is behind this process; recent calls can take a moment to appear.')
+    }
+    if (elsewhere > 0) {
+      lines.push(
+        `  ${elsewhere} call${elsewhere === 1 ? '' : 's'} this process billed to a different account key`
+        + ` ${elsewhere === 1 ? 'is' : 'are'} not part of this comparison.`,
+      )
     }
     if (ledger.unpricedCalls > 0) {
       lines.push(`  ${ledger.unpricedCalls} ledger call${ledger.unpricedCalls === 1 ? ' is' : 's are'} not priced yet and not in its total.`)
@@ -563,6 +582,19 @@ export function apply(ctx: Context, config: Config): void {
     }
     if (verb !== 'status') {
       return { kind: 'error', text: 'Usage: /blockrun [status | login brk_live_... | logout]' }
+    }
+    // Checked before anything is described. A saved key file that cannot be
+    // read, or holds something that is not a key, makes every paid request
+    // fail INVALID_CREDENTIAL — there is no wallet fallback to report, so
+    // naming one would send the reader looking in the wrong place.
+    try {
+      await accountKey()
+    } catch (error) {
+      return {
+        kind: 'error',
+        text: `${credentialProblem(error)}\nPaid requests fail until this is fixed; a wallet is not used in its place.`
+          + ' Fix or remove the file, or `/blockrun login brk_live_...` to replace it.',
+      }
     }
     const account = await accountLines()
     if (account.length > 0) return { kind: 'success', text: account.slice(1).join('\n') }

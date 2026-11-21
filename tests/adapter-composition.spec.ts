@@ -545,8 +545,56 @@ describe('/blockrun switches the credential the way `clawrouter login` does', ()
     await command(ctx, `/blockrun login ${KEY}`)
     await drain(ctx, 'blockrun')
     const text = (await command(ctx, '/spend')).text
-    expect(text).toMatch(/Account ledger since this process started: \$0\.0123 across 3 calls — this process recorded \$\S+ across 1\./)
+    expect(text).toMatch(/Account ledger since this process started: \$0\.0123 across 3 calls — this process recorded \$\S+ across 1 on this key\./)
     expect(text).toMatch(/2 of those were not made here/)
     expect(text).toMatch(/1 ledger call is not priced yet/)
+    expect(text).not.toMatch(/different account key/)
+  }, 30_000)
+
+  it('compares the ledger only with calls billed to the same key after switching accounts', async () => {
+    // Codex review, 2026-11-21: ten calls on account A then one on B compared
+    // B's ledger with all eleven and reported a lag that was not there.
+    const { lines } = await fresh()
+    const ctx = await boot(lines)
+    await command(ctx, `/blockrun login ${KEY}`)
+    await drain(ctx, 'blockrun')
+    await drain(ctx, 'blockrun')
+    await command(ctx, `/blockrun login brk_live_${'B'.repeat(40)}`)
+    await drain(ctx, 'blockrun')
+    const text = (await command(ctx, '/spend')).text
+    expect(text).toMatch(/this process recorded \$\S+ across 1 on this key\./)
+    expect(text).toMatch(/2 calls this process billed to a different account key are not part of this comparison/)
+    // The stub ledger holds 3 calls and this key made 1, so 2 came from
+    // elsewhere. It must NOT say the ledger is behind, which the mixed total did.
+    expect(text).not.toMatch(/ledger is behind/)
+  }, 30_000)
+
+  it('reports a broken saved key file as blocking, not as a wallet fallback', async () => {
+    // Codex review, 2026-11-21: status described a wallet the request path
+    // would never use, because the credential error was swallowed.
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-clawrouter-broken-'))
+    const path = join(dir, '.api-key')
+    await writeFile(path, 'not a key')
+    process.env['DSH_CLAWROUTER_TEST_WALLET'] = `0x${'1'.repeat(64)}`
+    try {
+      const ctx = await boot([
+        "    apiKeyEnv: 'DSH_CLAWROUTER_TEST_ABSENT_API_KEY'",
+        "    solanaWalletKeyEnv: 'DSH_CLAWROUTER_TEST_ABSENT_SOLANA_KEY'",
+        "    walletKeyEnv: 'DSH_CLAWROUTER_TEST_WALLET'",
+        `    apiKeyFiles: ['${path}']`,
+        ...local(),
+      ])
+      const status = await command(ctx, '/blockrun')
+      expect(status.kind).toBe('error')
+      expect(status.text).toContain(path)
+      expect(status.text).toMatch(/a wallet is not used in its place/)
+      expect(status.text).not.toMatch(/Paying per call from/)
+      // The request path agrees with what status said.
+      expect(failureCode(await drain(ctx, 'blockrun'))).toBe('INVALID_CREDENTIAL')
+      // /spend stays best-effort but says why paid calls fail.
+      expect((await command(ctx, '/spend')).text).toMatch(/account key cannot be used/)
+    } finally {
+      delete process.env['DSH_CLAWROUTER_TEST_WALLET']
+    }
   }, 30_000)
 })

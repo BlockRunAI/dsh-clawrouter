@@ -4,12 +4,13 @@
 // worth catching here is a mismatch between them: a key sent to the host that
 // answers it 402, a catalog read anonymously against a host that answers 401,
 // or a wallet quietly paying for a call the reader put on an account.
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   API_KEY_PATTERN,
+  accountFingerprint,
   catalogEndpoint,
   checkApiKey,
   clearSavedApiKeys,
@@ -252,6 +253,37 @@ describe('saving and removing a key', () => {
     expect(await readFile(path, 'utf8')).toBe(`${KEY}\n`)
     expect((await stat(path)).mode & 0o777).toBe(0o600)
     expect(await readSavedApiKey([path])).toEqual({ key: KEY, path })
+  })
+
+  it('makes a replaced key owner-only even when the old file was world-readable', async () => {
+    // Codex review, 2026-11-21: writeFile's mode applies only on create, so
+    // logging in over a 0644 file left the new key readable by everyone.
+    const dir = await scratch()
+    const path = join(dir, '.api-key')
+    await writeFile(path, `brk_live_${'O'.repeat(40)}\n`)
+    await chmod(path, 0o644)
+    await saveApiKey(KEY, path)
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+    expect(await readFile(path, 'utf8')).toBe(`${KEY}\n`)
+    // Nothing left behind from the staged write.
+    expect(await readdir(dir)).toEqual(['.api-key'])
+  })
+
+  it('leaves the previous key intact when the new one is refused', async () => {
+    const dir = await scratch()
+    const path = join(dir, '.api-key')
+    await writeFile(path, `${KEY}\n`)
+    await expect(saveApiKey('nope', path)).rejects.toThrow()
+    expect(await readFile(path, 'utf8')).toBe(`${KEY}\n`)
+    expect(await readdir(dir)).toEqual(['.api-key'])
+  })
+
+  it('labels a key without containing it', () => {
+    const label = accountFingerprint(KEY)
+    expect(label).toMatch(/^[0-9a-f]{16}$/)
+    expect(accountFingerprint(` ${KEY}\n`)).toBe(label)
+    expect(accountFingerprint(`brk_live_${'X'.repeat(40)}`)).not.toBe(label)
+    expect(KEY).not.toContain(label)
   })
 
   it('writes nothing for something that is not a key', async () => {
