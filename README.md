@@ -287,6 +287,15 @@ This is the shortest path, and the one to take unless you specifically want to a
 3. Issue a key at **[user.blockrun.ai/dashboard/keys](https://user.blockrun.ai/dashboard/keys)**. The plaintext is shown once; copy it then.
 4. `export BLOCKRUN_API_KEY=brk_live_...`
 
+**Already logged in with ClawRouter? Then you are done.** `clawrouter login brk_live_...` saves the key to `~/.blockrun/.api-key`, the location shared by BlockRun's tools, and this plugin reads it from there when `BLOCKRUN_API_KEY` is not set — so the same login covers both, and `clawrouter logout` switches both back. The environment variable still wins when it is set.
+
+`/spend` then names the key it is using, masked, and where it came from, and prints the account's remaining credit as the account host reports it:
+
+```
+BlockRun account key brk_live_Ab3xQ9…f8c1 (from ~/.blockrun/.api-key).
+Account credit: $41.20 remaining (spent $8.80). Top up at https://user.blockrun.ai/dashboard/credits.
+```
+
 What you get for it: **exact token billing with no per-call fee and no minimum**, and every call written to your account ledger — [`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) shows request id, model, tokens and cost per call, so `/spend` and the invoice can be reconciled against each other.
 
 A key with no credit on it still reaches the free models; anything with a price fails `PAYMENT_REQUIRED` pointing at the top-up page.
@@ -319,7 +328,7 @@ The <!-- br:models.free -->9<!-- /br:models.free --> models the catalog bills as
 
 ### About the credential itself
 
-This plugin reads no key file on its own. A credential nobody configured, quietly shadowing the one they did, is exactly what the harness credentials seam exists to prevent — so it only ever reads the reference you name.
+This plugin reads no **wallet** key file on its own. A private key nobody configured, quietly paying for calls, is exactly what the harness credentials seam exists to prevent — so a wallet is only ever read from the reference you name. The saved **account** key is the one exception, and a deliberate one: `~/.blockrun/.api-key` exists only because someone ran `clawrouter login`, which is already a decision about how this machine pays. If the file exists but cannot be read, or holds something that is not a `brk_…` key, the request fails naming the file rather than falling through to a wallet. Set `apiKeyFiles: []` to read no file at all.
 
 All three keys are **references** in configuration (`apiKeyEnv`, `solanaWalletKeyEnv`, `walletKeyEnv`), resolved per request — rotating either takes effect on the very next call, and no secret enters a config file.
 
@@ -331,6 +340,7 @@ All three keys are **references** in configuration (`apiKeyEnv`, `solanaWalletKe
 |---|---|---|
 | `provider` | `blockrun` | harness route key to register |
 | `apiKeyEnv` | `BLOCKRUN_API_KEY` | credential *reference* holding the BlockRun account key (`brk_live_…`) — **checked first** |
+| `apiKeyFiles` | `~/.blockrun/.api-key`, `~/.openclaw/blockrun/api-key` | files a saved account key is read from when `apiKeyEnv` resolves to nothing — where `clawrouter login` puts it. `[]` disables |
 | `solanaWalletKeyEnv` | `SOLANA_WALLET_KEY` | credential *reference* holding the bs58 Solana secret key — **checked before Base** |
 | `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | credential *reference* holding the EVM wallet key, used when neither of the above resolves |
 | `apiKeyUrl` | `https://api.blockrun.ai` | account API root an API key authenticates against |

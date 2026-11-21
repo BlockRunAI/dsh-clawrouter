@@ -281,6 +281,15 @@ export BLOCKRUN_API_KEY=brk_live_...   # 也可以存进 credentials 服务
 3. 在 **[user.blockrun.ai/dashboard/keys](https://user.blockrun.ai/dashboard/keys)** 签发一把 Key。明文只显示一次，当场复制。
 4. `export BLOCKRUN_API_KEY=brk_live_...`
 
+**已经用 ClawRouter 登录过？那就什么都不用做了。** `clawrouter login brk_live_...` 会把 Key 存到 `~/.blockrun/.api-key`——这是 BlockRun 各个工具共用的位置；没有设置 `BLOCKRUN_API_KEY` 时，本插件会从那里读取。所以一次登录两边都生效，`clawrouter logout` 也会让两边一起切回去。设置了环境变量时，仍以环境变量为准。
+
+之后 `/spend` 会写明它正在用哪把 Key（打码显示）、从哪里读到的，并打印账户主机报告的剩余额度：
+
+```
+BlockRun account key brk_live_Ab3xQ9…f8c1 (from ~/.blockrun/.api-key).
+Account credit: $41.20 remaining (spent $8.80). Top up at https://user.blockrun.ai/dashboard/credits.
+```
+
 这样换来的是：**按真实 token 用量精确计费，没有每次调用费，也没有最低消费**，并且每一次调用都会写进你的账户账本——[`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) 上能看到每次调用的 request id、模型、token 数和金额，所以 `/spend` 和账单可以互相对账。
 
 余额为 0 的 Key 仍然能调免费模型；任何收费模型会以 `PAYMENT_REQUIRED` 失败，并把你指向充值页面。
@@ -313,7 +322,7 @@ catalog 里标记为 `free` 的那 <!-- br:models.free -->9<!-- /br:models.free 
 
 ### 关于凭据本身
 
-本插件**不会自己去读**任何密钥文件。一个「用户没配置过、却悄悄盖住了他真正配置的那个」的凭据，正是 harness 凭据机制要防的事——所以它只读你指定的那个引用。
+本插件**不会自己去读**任何**钱包**密钥文件。一把「用户没配置过、却悄悄替他付了钱」的私钥，正是 harness 凭据机制要防的事——所以钱包只会从你指定的那个引用里读。已保存的**账户** Key 是唯一的例外，而且是有意为之：`~/.blockrun/.api-key` 只会因为有人运行过 `clawrouter login` 而存在，而那本身就是对「这台机器怎么付费」做出的决定。如果这个文件存在但读不了，或者里面不是 `brk_…` 开头的 Key，请求会直接失败并指出是哪个文件，而不会悄悄退回到钱包。把 `apiKeyFiles` 设为 `[]` 就完全不读文件。
 
 配置里写的三个都是**引用**（`apiKeyEnv`、`solanaWalletKeyEnv`、`walletKeyEnv`）而不是密钥本身，并且每次请求实时解析——换密钥下一次调用即生效，任何密钥都不会进入配置文件。
 
@@ -325,6 +334,7 @@ catalog 里标记为 `free` 的那 <!-- br:models.free -->9<!-- /br:models.free 
 |---|---|---|
 | `provider` | `blockrun` | 注册的路由名 |
 | `apiKeyEnv` | `BLOCKRUN_API_KEY` | 存放 BlockRun 账户 Key（`brk_live_…`）的凭据**引用**——**最优先** |
+| `apiKeyFiles` | `~/.blockrun/.api-key`、`~/.openclaw/blockrun/api-key` | `apiKeyEnv` 没有解析出任何值时，从这些文件读取已保存的账户 Key——也就是 `clawrouter login` 存放的位置。设为 `[]` 即禁用 |
 | `solanaWalletKeyEnv` | `SOLANA_WALLET_KEY` | 存放 bs58 Solana 私钥的凭据**引用**——**排在 Base 之前** |
 | `walletKeyEnv` | `BASE_CHAIN_WALLET_KEY` | 存放 EVM 钱包私钥的凭据**引用**，仅在前两个都没有时使用 |
 | `apiKeyUrl` | `https://api.blockrun.ai` | API Key 认证所对应的账户 API 根地址 |

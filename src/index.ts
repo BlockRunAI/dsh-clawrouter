@@ -24,11 +24,16 @@ import type { BlockrunConnection } from './adapter.ts'
 import {
   API_KEY_PATTERN,
   catalogEndpoint,
+  DEFAULT_API_KEY_FILES,
   DEFAULT_API_KEY_URL,
   DEFAULT_REQUEST_FEES,
   DEFAULT_SOLANA_API_URL,
+  fetchCreditBalance,
+  formatCreditBalance,
   freeTierKey,
+  maskApiKey,
   PORTAL_URL,
+  readSavedApiKey,
   requestFeeFor,
   SOLANA_WALLET_KEY_PATTERN,
   WALLET_KEY_PATTERN,
@@ -115,6 +120,21 @@ export interface Config {
    */
   apiKeyEnv?: string
   /**
+   * Files a saved account key is read from when {@link Config.apiKeyEnv}
+   * resolves to nothing, in order.
+   *
+   * Defaults to the two places ClawRouter keeps one — `~/.blockrun/.api-key`,
+   * which `clawrouter login` writes and which is shared across BlockRun
+   * products, then `~/.openclaw/blockrun/api-key`. So a machine already logged
+   * in with ClawRouter needs nothing exported here. The reference still wins
+   * when it is set: an environment variable or managed credential is the more
+   * specific instruction. Set this to `[]` to read no file at all.
+   *
+   * A file that exists but is unreadable, or does not hold a `brk_…` key,
+   * fails the request rather than falling through to a wallet.
+   */
+  apiKeyFiles?: string[]
+  /**
    * Credential *reference* naming the environment variable or managed entry
    * that holds the SOLANA wallet key, for paying per call over x402.
    *
@@ -195,6 +215,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   provider: z.string().default(DEFAULT_PROVIDER),
   apiKeyEnv: z.string().role('credential-ref').default('BLOCKRUN_API_KEY'),
+  apiKeyFiles: z.array(z.string()).default([...DEFAULT_API_KEY_FILES]),
   solanaWalletKeyEnv: z.string().role('credential-ref').default('SOLANA_WALLET_KEY'),
   walletKeyEnv: z.string().role('credential-ref').default('BASE_CHAIN_WALLET_KEY'),
   apiUrl: z.string().default(DEFAULT_API_URL),
@@ -235,9 +256,10 @@ export function apply(ctx: Context, config: Config): void {
   // Resolved per operation, never cached: a key rotated in the managed store
   // must reach the very next request without reloading this plugin.
   //
-  // This route deliberately reads no key file of its own. A credential nobody
-  // configured, quietly shadowing the one they did, is the confusion the
-  // credentials seam exists to prevent.
+  // No WALLET key file is read here: a private key nobody configured, quietly
+  // paying for calls, is the confusion the credentials seam exists to prevent.
+  // The saved ACCOUNT key is a different thing and is read below — see
+  // `accountKey`.
   const readCredential = async (reference: CredentialRef): Promise<string | undefined> => {
     const credentials = ctx.get('credentials')
     if (credentials !== undefined) {
@@ -248,6 +270,34 @@ export function apply(ctx: Context, config: Config): void {
     // launching environment is the whole credential plane.
     const ambient = launchEnvironmentOf(ctx).get(reference)
     return ambient === undefined || ambient.value.length === 0 ? undefined : ambient.value
+  }
+
+  const apiKeyFiles = config.apiKeyFiles ?? DEFAULT_API_KEY_FILES
+
+  /**
+   * The account key this deployment is on, and where it came from.
+   *
+   * The reference first, then the saved files. Until 0.13.0 only the reference
+   * was read, on the principle that this route opens no key file of its own —
+   * which left a machine that had run `clawrouter login` being told it had no
+   * credential, with the key it was asking for sitting in `~/.blockrun`. That
+   * file is not a stray secret this route happened to find: it is written by
+   * an explicit login, for every BlockRun product on the machine to use.
+   *
+   * Read per request like every other credential, so `clawrouter login` and
+   * `logout` take effect on the next call without a reload.
+   * @returns the key and a human-readable source, or undefined on a wallet deployment.
+   */
+  const accountKey = async (): Promise<{ key: string; source: string } | undefined> => {
+    const referenced = await readCredential(apiKeyRef)
+    if (referenced !== undefined) return { key: assertUsableApiKey(referenced, apiKeyRef), source: apiKeyRef }
+    let saved
+    try {
+      saved = await readSavedApiKey(apiKeyFiles)
+    } catch (error) {
+      throw new LlmError(`dsh-clawrouter: ${(error as Error).message}`, 'INVALID_CREDENTIAL', { cause: error })
+    }
+    return saved === undefined ? undefined : { key: saved.key, source: saved.path }
   }
 
   /**
@@ -266,10 +316,8 @@ export function apply(ctx: Context, config: Config): void {
    *   4. Then Base.
    */
   const resolveAuth: AuthResolver = async ({ free }): Promise<BlockrunAuth> => {
-    const apiKey = await readCredential(apiKeyRef)
-    if (apiKey !== undefined) {
-      return { mode: 'api-key', apiKey: assertUsableApiKey(apiKey, apiKeyRef), apiUrl: apiKeyUrl }
-    }
+    const account = await accountKey()
+    if (account !== undefined) return { mode: 'api-key', apiKey: account.key, apiUrl: apiKeyUrl }
     // No account key, and this model costs nothing: the gateway answers it
     // `200` with no 402 at all, so the throwaway key below signs nothing and
     // the route works with no credential configured whatsoever.
@@ -306,6 +354,7 @@ export function apply(ctx: Context, config: Config): void {
       + `  Recommended — an API key: sign in at ${PORTAL_URL}, add credit, issue a key under\n`
       + `      ${PORTAL_URL}/dashboard/keys, then export it:\n`
       + `      export ${apiKeyRef}=brk_live_...\n`
+      + '      (or `clawrouter login brk_live_...`, which saves it where this route also looks)\n'
       + '  Prefer to pay per call from a wallet? BlockRun accepts an x402 signature on Solana or Base.\n'
       + '  Have a Solana wallet? Export the bs58 secret key:\n'
       + `      export ${solanaRef}=...   (needs @solana/web3.js and @solana/spl-token installed)\n`
@@ -380,13 +429,44 @@ export function apply(ctx: Context, config: Config): void {
     requestFee: auth => requestFeeFor(auth, requestFees),
   })
 
+  /**
+   * What `/spend` adds on an account-key deployment: which key is in use, and
+   * what the account host says is left.
+   *
+   * The meter above it only knows this process. The balance is the one number
+   * that is not local — the same key may be in use on another machine or by
+   * ClawRouter itself — and there is no wallet to look at instead. Nothing is
+   * printed on a wallet deployment, and a credential problem is left for the
+   * next request to report in full rather than restated here.
+   */
+  const accountLines = async (): Promise<string[]> => {
+    let account
+    try {
+      account = await accountKey()
+    } catch {
+      return []
+    }
+    if (account === undefined) return []
+    const balance = await fetchCreditBalance(apiKeyUrl, account.key)
+    return [
+      '',
+      `BlockRun account key ${maskApiKey(account.key)} (from ${account.source}).`,
+      balance === undefined
+        ? `Credit could not be read just now; see ${PORTAL_URL}/dashboard/credits.`
+        : `Account credit: ${formatCreditBalance(balance)}. Top up at ${PORTAL_URL}/dashboard/credits.`,
+    ]
+  }
+
   // Optional child fiber: a composition with no command surface still routes
   // requests; it just has nowhere to print this.
   ctx.inject(['commands'], (commandCtx) => {
     commandCtx.commands.register({
       name: 'spend',
       description: `what the ${provider} route has cost this process`,
-      handler: () => ({ kind: 'success', text: renderSpend(meter.summary()) }),
+      handler: async () => ({
+        kind: 'success',
+        text: [renderSpend(meter.summary()), ...await accountLines()].join('\n'),
+      }),
     })
   })
 

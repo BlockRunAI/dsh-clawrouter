@@ -30,7 +30,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { BlockrunAdapter } from '../src/adapter.ts'
 import { BlockrunCatalog, VERIFIED_VISION_MODELS } from '../src/catalog.ts'
-import { catalogEndpoint, DEFAULT_API_KEY_URL, DEFAULT_SOLANA_API_URL, freeTierKey } from '../src/auth.ts'
+import { catalogEndpoint, DEFAULT_API_KEY_URL, DEFAULT_SOLANA_API_URL, freeTierKey, readSavedApiKey } from '../src/auth.ts'
 import { DEFAULT_API_URL } from '../src/index.ts'
 import { SpendMeter } from '../src/spend.ts'
 
@@ -44,13 +44,21 @@ import { SpendMeter } from '../src/spend.ts'
  * key on a wallet gateway is answered 402, the account host answers an
  * unauthenticated chat request 401, and neither chain can verify the other's
  * signature — so the host travels with the credential.
- * @returns {import('../src/auth.ts').BlockrunAuth | undefined} the resolved
- *   auth, or undefined when no credential is available at all.
+ *
+ * An account key saved by `clawrouter login` counts, exactly as it does in the
+ * plugin: a probe that ignored it would pay forty flat wallet quotes on a
+ * machine that had already arranged to be billed at usage.
+ * @returns {Promise<import('../src/auth.ts').BlockrunAuth | undefined>} the
+ *   resolved auth, or undefined when no credential is available at all.
  */
-function resolveProbeAuth() {
+async function resolveProbeAuth() {
   const account = process.env['BLOCKRUN_API_KEY']?.trim()
   if (account !== undefined && account.length > 0) {
     return /** @type {const} */ ({ mode: 'api-key', apiKey: account, apiUrl: DEFAULT_API_KEY_URL })
+  }
+  const saved = await readSavedApiKey()
+  if (saved !== undefined) {
+    return /** @type {const} */ ({ mode: 'api-key', apiKey: saved.key, apiUrl: DEFAULT_API_KEY_URL })
   }
   const solana = process.env['SOLANA_WALLET_KEY']?.trim()
   if (solana !== undefined && solana.length > 0) {
@@ -61,7 +69,7 @@ function resolveProbeAuth() {
   return /** @type {const} */ ({ mode: 'wallet', privateKey: wallet, apiUrl: DEFAULT_API_URL })
 }
 
-const AUTH = resolveProbeAuth()
+const AUTH = await resolveProbeAuth()
 const API_URL = AUTH?.apiUrl ?? DEFAULT_API_URL
 /** Headers the catalog read needs; the account host refuses an anonymous one. */
 const CATALOG_HEADERS = AUTH === undefined ? {} : (catalogEndpoint(AUTH).headers ?? {})
@@ -324,7 +332,7 @@ async function main() {
   // because that host answers an unauthenticated request 401 whatever it costs.
   if (AUTH === undefined && paid.length > 0) {
     console.log(
-      'No BlockRun credential found (BLOCKRUN_API_KEY, SOLANA_WALLET_KEY,'
+      'No BlockRun credential found (BLOCKRUN_API_KEY or ~/.blockrun/.api-key, SOLANA_WALLET_KEY,'
       + ' or BASE_CHAIN_WALLET_KEY / ~/.blockrun/.session);'
       + ' paid models will fail.\n',
     )

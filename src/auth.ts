@@ -45,6 +45,9 @@
  */
 
 import { randomBytes } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 /** Account-billed API root; `brk_live_…` keys are only valid here. */
 export const DEFAULT_API_KEY_URL = 'https://api.blockrun.ai'
@@ -59,6 +62,173 @@ export const PORTAL_URL = 'https://user.blockrun.ai'
  * rejected one layer down with a worse message.
  */
 export const API_KEY_PATTERN = /^brk_[A-Za-z0-9_-]+$/
+
+/**
+ * Where a saved account key is looked for when the credential reference
+ * resolves to nothing, in order.
+ *
+ * These are ClawRouter's two locations, and they are here for the same reason
+ * they are there: `clawrouter login brk_live_…` writes the first one, labelled
+ * as shared across BlockRun products, and a person who has done that has
+ * already told this machine how they want to pay. Asking them to export the
+ * same key again under an environment variable — and failing with "no
+ * credential" until they do — is this route not honouring a decision that was
+ * made. The second is ClawRouter's older location.
+ *
+ * `~` is expanded per read, so the files of whoever is running the process are
+ * the ones consulted.
+ */
+export const DEFAULT_API_KEY_FILES: readonly string[] = [
+  '~/.blockrun/.api-key',
+  '~/.openclaw/blockrun/api-key',
+]
+
+/** A saved key, and the file it was read from. */
+export interface SavedApiKey {
+  readonly key: string
+  /** The path as configured, `~` unexpanded, so a diagnostic names what the reader typed. */
+  readonly path: string
+}
+
+/**
+ * The saved account key, from the first file that holds one.
+ *
+ * Two failures are deliberately loud, both taken from ClawRouter, because the
+ * quiet alternative spends the wrong money:
+ *
+ * - **A file that exists and cannot be read.** Only `ENOENT` means "no key
+ *   saved". A permissions or I/O error is a credential this route was told
+ *   about and cannot see, and falling through would pay from a wallet the
+ *   reader meant to leave alone.
+ * - **A file whose content is not a key.** Skipping it would move on to the
+ *   next source, which could be a different account's key or a wallet.
+ *
+ * An empty file counts as absent: it cannot be mistaken for anyone's
+ * credential, and it is what a half-finished `logout` leaves behind.
+ * @param paths - candidate files, `~`-prefixed or absolute.
+ * @returns the key and where it came from, or undefined when none is saved.
+ * @throws Error naming the file, never its content, for the two cases above.
+ */
+export async function readSavedApiKey(
+  paths: readonly string[] = DEFAULT_API_KEY_FILES,
+): Promise<SavedApiKey | undefined> {
+  for (const path of paths) {
+    if (path.length === 0) continue
+    const resolved = path === '~' || path.startsWith('~/') ? join(homedir(), path.slice(1)) : path
+    let content: string
+    try {
+      content = (await readFile(resolved, 'utf8')).trim()
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw new Error(
+        `Cannot read the BlockRun API key file ${path}; refusing to fall back to another account or a wallet.`,
+        { cause: error },
+      )
+    }
+    if (content.length === 0) continue
+    if (!API_KEY_PATTERN.test(content)) {
+      throw new Error(
+        `${path} does not contain a BlockRun API key (expected it to start with "brk_").`
+        + ` Save a valid one with \`clawrouter login\`, or remove the file to pay another way.`
+        + ' Refusing to fall back silently: the next source could bill a different account or spend from a wallet.',
+      )
+    }
+    return { key: content, path }
+  }
+  return undefined
+}
+
+/**
+ * A key rendered for a status line: enough to tell two apart, never enough to
+ * use. The portal labels a key by its first 14 characters, so the head matches
+ * what the dashboard shows.
+ * @param key - the full key.
+ * @returns the masked form.
+ */
+export function maskApiKey(key: string): string {
+  const trimmed = key.trim()
+  if (trimmed.length <= 18) return `${trimmed.slice(0, 8)}…`
+  return `${trimmed.slice(0, 14)}…${trimmed.slice(-4)}`
+}
+
+/**
+ * What `GET /v1/credits` reports for the calling key.
+ *
+ * `remainingUsd` is nullable and that is not an error path: an account in
+ * `ungated` billing has no granted allowance to draw down, so the host reports
+ * `remaining_usd: null` and only `spent_usd` means anything. Printing that as
+ * "$0.00" would tell such a reader they are out of money when they are not.
+ */
+export interface CreditBalance {
+  readonly billingMode?: string
+  readonly spentUsd: number | null
+  readonly remainingUsd: number | null
+  readonly blocked: boolean
+  readonly blockedReason?: string
+}
+
+/** How long `/spend` waits on the account host before printing without the balance. */
+export const CREDIT_FETCH_TIMEOUT_MS = 5_000
+
+/**
+ * The account's credit position, or undefined when it cannot be read.
+ *
+ * Never throws: this decorates a status command, and a blip on the account
+ * host must not turn "what have I spent" into an error. The endpoint and its
+ * field names are the ones ClawRouter's `status` reads.
+ * @param apiUrl - the account API root.
+ * @param apiKey - the account key, sent as a bearer token to that host only.
+ * @param timeoutMs - deadline for the read.
+ * @returns the balance, or undefined on any failure.
+ */
+export async function fetchCreditBalance(
+  apiUrl: string,
+  apiKey: string,
+  timeoutMs: number = CREDIT_FETCH_TIMEOUT_MS,
+): Promise<CreditBalance | undefined> {
+  try {
+    const response = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/credits`, {
+      headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(timeoutMs),
+      // A bearer token must not follow a redirect to wherever Location says.
+      redirect: 'error',
+    })
+    if (!response.ok) return undefined
+    const body = await response.json() as Record<string, unknown>
+    const amount = (value: unknown): number | null =>
+      typeof value === 'number' && Number.isFinite(value) ? value : null
+    return {
+      ...typeof body['billing_mode'] === 'string' ? { billingMode: body['billing_mode'] } : {},
+      spentUsd: amount(body['spent_usd']),
+      remainingUsd: amount(body['remaining_usd']),
+      blocked: body['blocked'] === true,
+      ...typeof body['blocked_reason'] === 'string' ? { blockedReason: body['blocked_reason'] } : {},
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * One line saying where the account stands.
+ * @param balance - what the account host reported.
+ * @returns e.g. `$41.20 remaining (spent $8.80)`.
+ */
+export function formatCreditBalance(balance: CreditBalance): string {
+  const money = (value: number | null): string | undefined =>
+    value === null ? undefined : `$${value.toFixed(value > 0 && value < 0.01 ? 6 : 2)}`
+  const remaining = money(balance.remainingUsd)
+  const spent = money(balance.spentUsd)
+  const position = remaining !== undefined
+    ? `${remaining} remaining${spent === undefined ? '' : ` (spent ${spent})`}`
+    // No allowance to run down, so spend to date is the figure that means
+    // anything.
+    : `${spent === undefined ? 'balance not reported' : `spent ${spent}`} — `
+      + (balance.billingMode === 'ungated' ? 'no prepaid limit' : balance.billingMode ?? 'billing mode not reported')
+  return balance.blocked
+    ? `${position} — BLOCKED${balance.blockedReason === undefined ? '' : `: ${balance.blockedReason}`}`
+    : position
+}
 
 /** An EVM private key the x402 signer can actually use. */
 export const WALLET_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/

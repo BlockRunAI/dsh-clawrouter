@@ -48,6 +48,11 @@ beforeEach(async () => {
   seen = []
   gateway = createServer((req, res) => {
     seen.push({ url: req.url ?? '', authorization: req.headers['authorization'] })
+    if (req.url?.endsWith('/v1/credits') === true) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ billing_mode: 'prepaid', granted_usd: 50, spent_usd: 8.8, remaining_usd: 41.2, blocked: false }))
+      return
+    }
     if (req.url?.endsWith('/models') === true) {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify(CATALOG))
@@ -353,5 +358,81 @@ describe('/spend in the composed context', () => {
     const entry = [...ctx.loader.entries()].find(e => e.options.name === 'dsh-clawrouter')
     await entry?.fiber?.dispose()
     expect(ctx.commands.list(owner).map(c => c.name)).not.toContain('spend')
+  }, 30_000)
+})
+
+describe('a key saved by `clawrouter login` is honoured', () => {
+  // ClawRouter writes the account key to ~/.blockrun/.api-key for every
+  // BlockRun product on the machine. Until 0.13.0 this route ignored it, so a
+  // machine that was already logged in was told it had no credential.
+  const SAVED_KEY = `brk_live_${'S'.repeat(40)}`
+
+  /** Config lines pointing the route at a key file inside the test's own directory. */
+  async function withSavedKey(content: string): Promise<string[]> {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-clawrouter-keyfile-'))
+    const path = join(dir, '.api-key')
+    await writeFile(path, content, { mode: 0o600 })
+    return [...ABSENT, `    apiKeyFiles: ['${path}']`, `    apiKeyUrl: '${apiUrl.replace(/\/api$/, '')}'`, ...local()]
+  }
+
+  it('sends the saved key as a bearer token when nothing is exported', async () => {
+    const ctx = await boot(await withSavedKey(`${SAVED_KEY}\n`))
+    const chunks = await drain(ctx, 'blockrun')
+    expect(failureCode(chunks)).toBeUndefined()
+    const chat = seen.filter(request => request.url.endsWith('/chat/completions'))
+    expect(chat).toHaveLength(1)
+    expect(chat[0]?.authorization).toBe(`Bearer ${SAVED_KEY}`)
+  }, 30_000)
+
+  it('lets the configured reference win over the saved file', async () => {
+    const exported = `brk_live_${'E'.repeat(40)}`
+    process.env['DSH_CLAWROUTER_TEST_API_KEY'] = exported
+    try {
+      const lines = (await withSavedKey(SAVED_KEY)).filter(line => !line.includes('apiKeyEnv'))
+      const ctx = await boot([...lines, "    apiKeyEnv: 'DSH_CLAWROUTER_TEST_API_KEY'"])
+      await drain(ctx, 'blockrun')
+      const chat = seen.filter(request => request.url.endsWith('/chat/completions'))
+      expect(chat[0]?.authorization).toBe(`Bearer ${exported}`)
+    } finally {
+      delete process.env['DSH_CLAWROUTER_TEST_API_KEY']
+    }
+  }, 30_000)
+
+  it('refuses a saved file that does not hold a key, rather than falling through to a wallet', async () => {
+    process.env['DSH_CLAWROUTER_TEST_WALLET'] = `0x${'1'.repeat(64)}`
+    try {
+      const lines = (await withSavedKey('not a key')).filter(line => !line.includes('walletKeyEnv'))
+      const ctx = await boot([...lines, "    walletKeyEnv: 'DSH_CLAWROUTER_TEST_WALLET'"])
+      // The wallet is right there and valid. Using it would spend USDC on a
+      // call the reader had arranged to put on an account.
+      expect(failureCode(await drain(ctx, 'blockrun'))).toBe('INVALID_CREDENTIAL')
+      expect(seen.filter(request => request.url.endsWith('/chat/completions'))).toHaveLength(0)
+    } finally {
+      delete process.env['DSH_CLAWROUTER_TEST_WALLET']
+    }
+  }, 30_000)
+
+  it('reads no file at all when apiKeyFiles is empty', async () => {
+    const lines = (await withSavedKey(SAVED_KEY)).filter(line => !line.includes('apiKeyFiles'))
+    const ctx = await boot([...lines, '    apiKeyFiles: []'])
+    expect(failureCode(await drain(ctx, 'blockrun'))).toBe('MISSING_CREDENTIAL')
+  }, 30_000)
+
+  it('names the key and the account credit in /spend, without printing the key', async () => {
+    const ctx = await boot(await withSavedKey(SAVED_KEY))
+    const result = await ctx.commands.execute(agent(ctx), '/spend', [], new AbortController().signal)
+    const text = result?.result.kind === 'success' ? result.result.text : ''
+    expect(text).toMatch(/BlockRun account key brk_live_SSSSS…SSSS \(from .*\.api-key\)/)
+    expect(text).toMatch(/Account credit: \$41\.20 remaining \(spent \$8\.80\)/)
+    expect(text).not.toContain(SAVED_KEY)
+    expect(seen.find(request => request.url.endsWith('/v1/credits'))?.authorization).toBe(`Bearer ${SAVED_KEY}`)
+  }, 30_000)
+
+  it('prints nothing about an account on a deployment that has none', async () => {
+    const ctx = await boot([...ABSENT, '    apiKeyFiles: []', ...local()])
+    const result = await ctx.commands.execute(agent(ctx), '/spend', [], new AbortController().signal)
+    const text = result?.result.kind === 'success' ? result.result.text : ''
+    expect(text).not.toMatch(/account/i)
+    expect(seen.filter(request => request.url.endsWith('/v1/credits'))).toHaveLength(0)
   }, 30_000)
 })

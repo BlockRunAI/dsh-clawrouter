@@ -4,10 +4,18 @@
 // worth catching here is a mismatch between them: a key sent to the host that
 // answers it 402, a catalog read anonymously against a host that answers 401,
 // or a wallet quietly paying for a call the reader put on an account.
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   API_KEY_PATTERN,
   catalogEndpoint,
+  DEFAULT_API_KEY_FILES,
+  fetchCreditBalance,
+  formatCreditBalance,
+  maskApiKey,
+  readSavedApiKey,
   DEFAULT_API_KEY_URL,
   DEFAULT_SOLANA_API_URL,
   freeTierKey,
@@ -140,5 +148,92 @@ describe('a Solana catalog read is anonymous, like the other wallet gateway', ()
     })
     expect(endpoint.baseURL).toBe('https://sol.blockrun.ai/api/v1')
     expect(endpoint.headers).toBeUndefined()
+  })
+})
+
+describe('a saved account key is read the way ClawRouter reads it', () => {
+  const KEY = `brk_live_${'K'.repeat(40)}`
+  const scratch = (): Promise<string> => mkdtemp(join(tmpdir(), 'dsh-clawrouter-auth-'))
+
+  it('looks where `clawrouter login` writes, then at the older location', () => {
+    expect(DEFAULT_API_KEY_FILES).toEqual(['~/.blockrun/.api-key', '~/.openclaw/blockrun/api-key'])
+  })
+
+  it('is undefined when no file exists, which is the normal state on a wallet deployment', async () => {
+    const dir = await scratch()
+    expect(await readSavedApiKey([join(dir, 'a'), join(dir, 'b')])).toBeUndefined()
+  })
+
+  it('takes the first file that holds a key and says which one', async () => {
+    const dir = await scratch()
+    await writeFile(join(dir, 'second'), `${KEY}\n`)
+    expect(await readSavedApiKey([join(dir, 'first'), join(dir, 'second')]))
+      .toEqual({ key: KEY, path: join(dir, 'second') })
+  })
+
+  it('expands ~ against the home of whoever is running', async () => {
+    const home = await scratch()
+    await mkdir(join(home, '.blockrun'))
+    await writeFile(join(home, '.blockrun', '.api-key'), KEY)
+    const before = process.env['HOME']
+    process.env['HOME'] = home
+    try {
+      expect(await readSavedApiKey()).toEqual({ key: KEY, path: '~/.blockrun/.api-key' })
+    } finally {
+      process.env['HOME'] = before
+    }
+  })
+
+  it('treats an empty file as absent', async () => {
+    const dir = await scratch()
+    await writeFile(join(dir, 'empty'), '  \n')
+    await writeFile(join(dir, 'real'), KEY)
+    expect((await readSavedApiKey([join(dir, 'empty'), join(dir, 'real')]))?.key).toBe(KEY)
+  })
+
+  it('refuses a file that holds something else, naming the file and not its content', async () => {
+    const dir = await scratch()
+    const secret = `0x${'a'.repeat(64)}`
+    await writeFile(join(dir, 'wrong'), secret)
+    await writeFile(join(dir, 'real'), KEY)
+    // Skipping it would reach the next file — a different account's key.
+    const failure = await readSavedApiKey([join(dir, 'wrong'), join(dir, 'real')]).catch((error: Error) => error)
+    expect(failure).toBeInstanceOf(Error)
+    expect((failure as Error).message).toContain(join(dir, 'wrong'))
+    expect((failure as Error).message).not.toContain(secret)
+  })
+
+  it('refuses a file that exists but cannot be read', async () => {
+    const dir = await scratch()
+    // A directory where the file should be: present, and not ENOENT.
+    await mkdir(join(dir, 'key'))
+    await expect(readSavedApiKey([join(dir, 'key')])).rejects.toThrow(/Cannot read the BlockRun API key file/)
+  })
+
+  it('masks a key to the head the portal shows and four trailing characters', () => {
+    expect(maskApiKey('brk_live_Ab3xQ9zzzzzzzzzzzzzzzzf8c1')).toBe('brk_live_Ab3xQ…f8c1')
+    expect(maskApiKey('brk_short')).toBe('brk_shor…')
+  })
+})
+
+describe('the account credit line', () => {
+  it('reads remaining and spent', () => {
+    expect(formatCreditBalance({ spentUsd: 8.8, remainingUsd: 41.2, blocked: false }))
+      .toBe('$41.20 remaining (spent $8.80)')
+  })
+
+  it('does not call an ungated account broke', () => {
+    // remaining_usd is null there by design; "$0.00 remaining" would be a lie.
+    expect(formatCreditBalance({ billingMode: 'ungated', spentUsd: 3.5, remainingUsd: null, blocked: false }))
+      .toBe('spent $3.50 — no prepaid limit')
+  })
+
+  it('says so when the account is blocked', () => {
+    expect(formatCreditBalance({ spentUsd: 5, remainingUsd: 0, blocked: true, blockedReason: 'credit exhausted' }))
+      .toBe('$0.00 remaining (spent $5.00) — BLOCKED: credit exhausted')
+  })
+
+  it('answers undefined, never an error, when the host cannot be reached', async () => {
+    expect(await fetchCreditBalance('http://127.0.0.1:1', 'brk_live_x', 500)).toBeUndefined()
   })
 })

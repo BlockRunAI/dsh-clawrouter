@@ -15,6 +15,8 @@
     #      https://user.blockrun.ai/dashboard/keys. Billed at exact token
     #      usage with no per-call fee, and every call shows up on the
     #      account's own dashboard. This is the recommended way in.
+    #      A key saved by `clawrouter login` (~/.blockrun/.api-key) is picked
+    #      up too when this variable is unset; `apiKeyFiles: []` turns that off.
     #   2. SOLANA_WALLET_KEY — a bs58 Solana secret key, paying each request
     #      in SPL USDC over x402. Needs @solana/web3.js and @solana/spl-token
     #      installed; they are optional peers, so a Base-only or API-key
