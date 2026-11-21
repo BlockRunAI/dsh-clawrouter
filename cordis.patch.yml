@@ -23,8 +23,9 @@
     #      Base USDC over x402.
     #
     # Solana is checked before Base: a deployment holding both wallets has said
-    # which chains it CAN pay on, not which it prefers. Both gateways serve the
-    # same catalog, verified id for id.
+    # which chains it CAN pay on, not which it prefers. The catalog is read
+    # from whichever host the credential is valid on; the three hosts list
+    # nearly, but no longer exactly, the same models.
     #
     # With none of the three, the models the catalog bills as `free` still work.
     # Adding this route does NOT change the agent's default model — `dsh-base`
