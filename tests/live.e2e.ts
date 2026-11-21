@@ -28,6 +28,9 @@ import { SpendMeter } from '../src/spend.ts'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { BlockrunCatalog, projectCatalog, projectFreeModels } from '../src/catalog.ts'
 import { buildReviewPrompt, matchRisk, parseVerdict, REVIEW_SYSTEM_PROMPT } from '../src/reviewer.ts'
+// The reviewer tests exercise the model that actually ships as the default,
+// so changing the default cannot leave them proving something about another.
+import { DEFAULT_REVIEWER_MODEL } from '../src/review.ts'
 
 const API_URL = 'https://blockrun.ai/api'
 
@@ -210,7 +213,7 @@ live('live gateway (spends real USDC)', () => {
     expect(match?.rule).toBe('recursive-delete')
 
     const chunks = await collect(
-      'anthropic/claude-opus-5',
+      DEFAULT_REVIEWER_MODEL,
       buildReviewPrompt('bash', { command }, match!, '/tmp/project'),
       256,
       REVIEW_SYSTEM_PROMPT,
@@ -227,7 +230,7 @@ live('live gateway (spends real USDC)', () => {
     const command = 'rm -rf ./dist'
     const match = matchRisk('bash', { command })!
     const chunks = await collect(
-      'anthropic/claude-opus-5',
+      DEFAULT_REVIEWER_MODEL,
       buildReviewPrompt('bash', { command }, match, '/tmp/project'),
       256,
       REVIEW_SYSTEM_PROMPT,
@@ -257,7 +260,7 @@ live('prompt injection through the reviewed command', () => {
     expect(match, 'the command must still be flagged').toBeDefined()
 
     const chunks = await collect(
-      'anthropic/claude-opus-5',
+      DEFAULT_REVIEWER_MODEL,
       buildReviewPrompt('bash', { command }, match!, '/tmp/project'),
       256,
       REVIEW_SYSTEM_PROMPT,

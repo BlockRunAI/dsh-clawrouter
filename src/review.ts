@@ -40,8 +40,16 @@ export {
 } from './reviewer.ts'
 export type { RiskRule } from './reviewer.ts'
 
-/** Model used to review when configuration names none. */
-export const DEFAULT_REVIEWER_MODEL = 'anthropic/claude-opus-5'
+/**
+ * Model used to review when configuration names none.
+ *
+ * Opus 5.5 since 0.14.0, replacing Opus 5: the newer model, and cheaper per
+ * review at the same cap — $0.0144 against $0.0178 as live Base 402 quotes for
+ * a real review request on 2026-11-21, because it is listed at $4/$20 per
+ * million where Opus 5 is $5/$25. Served on all three hosts. A deployment that
+ * wants Opus 5 back sets `reviewerModel: anthropic/claude-opus-5`.
+ */
+export const DEFAULT_REVIEWER_MODEL = 'anthropic/claude-opus-5.5'
 
 /** How long one review may take before the gate stops waiting. */
 export const DEFAULT_REVIEW_TIMEOUT_MS = 30_000
@@ -58,11 +66,11 @@ export const MAX_REVIEWER_RESPONSE_CHARS = 16_384
  *
  * This gateway quotes on the `max_tokens` a request ASKS for and settles that
  * amount whichever way the model answers, so an uncapped review is billed for
- * output a verdict never uses. Measured on `anthropic/claude-opus-5` with a
- * real review prompt, as live Base 402 quotes on 2026-11-21: $0.2194 uncapped
- * against $0.0178 at this value — twelve times the cost of a two-field JSON
- * verdict, every time the gate fires. (Those read $0.0249 and $0.0057 before
- * the gateway began quoting the whole cap at list price.)
+ * output a verdict never uses. Measured on the default reviewer,
+ * `anthropic/claude-opus-5.5`, with a real review prompt, as live Base 402
+ * quotes on 2026-11-21: $0.1757 uncapped against $0.0144 at this value —
+ * twelve times the cost of a two-field JSON verdict, every time the gate
+ * fires. (Opus 5 reads $0.2194 and $0.0178 on the same request.)
  *
  * 512 tokens is roughly 2,000 characters, far beyond any verdict the system
  * prompt asks for. A model that somehow exceeds it produces an unparseable

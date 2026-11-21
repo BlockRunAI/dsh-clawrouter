@@ -4,6 +4,11 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## Unreleased
+
+### Changed
+- **The default reviewer is now `anthropic/claude-opus-5.5`, replacing `anthropic/claude-opus-5`.** It is the newer model and costs less per review: a real gate review at the 512-token cap is quoted **$0.0144** on a Base wallet against $0.0178 on Opus 5 (live 402 quotes, 2026-11-21), because Opus 5.5 is listed at $4/$20 per million where Opus 5 is $5/$25. On an API key the saving is the same 20% on the tokens actually used. It is served on all three hosts. A profile that names `reviewerModel` keeps whatever it names; to stay on Opus 5, set `reviewerModel: anthropic/claude-opus-5`. The live reviewer tests now run against whatever the default is, so they cannot keep vouching for a model that no longer ships.
+
 ## 0.13.1 — 2026-11-21
 
 Three fixes to the `/blockrun` commands 0.13.0 added, all found by an independent Codex review before 0.13.0 reached npm. Each has a test that fails on 0.13.0.

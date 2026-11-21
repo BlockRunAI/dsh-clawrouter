@@ -70,7 +70,7 @@ Two things people keep asking for in the Harness discussions:
 
 ### 1. Review gate
 
-When the agent proposes something destructive, a strong model (default `anthropic/claude-opus-5`) reads it and answers:
+When the agent proposes something destructive, a strong model (default `anthropic/claude-opus-5.5`) reads it and answers:
 
 | Verdict | What happens |
 |---|---|
@@ -86,7 +86,7 @@ Enable it in your profile's `cordis.patch.yml`:
 - id: blockrun-review
   config:
     enabled: true
-    reviewerModel: anthropic/claude-opus-5
+    reviewerModel: anthropic/claude-opus-5.5
 ```
 
 **What gets reviewed.** Deliberately narrow — a gate that fires on ordinary work gets switched off, and then it protects nobody. Reads, edits and builds are never reviewed. The shipped rules flag recursive deletes, raw disk writes, fork bombs, `curl … | sh`, force-pushes and hard resets, `chmod 777`, `sudo`, and anything touching `~/.ssh`, `~/.aws`, or `/etc/passwd` — plus destruction that isn't spelled `rm`: `git clean -fdx`, `find … -delete`, `git checkout -- .`, `terraform destroy`, and `npm publish` (a registry will not let you take a release back).
@@ -113,13 +113,13 @@ Measured, because this is the question that decides whether you keep it enabled:
 | Misses dangerous work | **none** of 39, across git, containers, clusters, cloud storage, databases, and host state |
 | Catches files that execute later | git hooks, CI workflows, shell startup files, launch agents, `.gitconfig`, `.env`, npm `postinstall`, sandbox escalation — 10 of 10, 0 false positives across 15 ordinary file edits |
 | Survives evasion | `\rm -rf /`, `command rm`, `env rm`, `eval "rm -rf $DIR"`, `bash -c "…"`, `\| xargs rm`, and heredocs piped into a shell |
-| Cost when it does fire | **$0.0178** on `claude-opus-5` from a Base wallet, at the 512-token reviewer cap — $0.2194 without it. On an API key it is billed on the tokens the verdict actually used, not on the cap |
+| Cost when it does fire | **$0.0144** on `claude-opus-5.5` from a Base wallet, at the 512-token reviewer cap — $0.1757 without it. On an API key it is billed on the tokens the verdict actually used, not on the cap |
 | Latency when it does fire | ~3s |
 | What the reviewer sees | ~356 tokens — the flagged call, not your conversation |
 
-**That figure depends on the cap.** This gateway quotes from the request — input size plus the `max_tokens` asked for — and settles that amount whichever way the model answers, so a review that asks for room it never uses pays for it every time the gate fires. `reviewerMaxTokens` (512) is what keeps a two-field JSON verdict priced like one. Both figures are live 402 quotes for a real review request, read 2026-11-21; they are roughly three times what this section said before, because the gateway now quotes list price on the whole cap where it used to quote about a tenth of it. Before 0.10.0 the reviewer inherited `claude-opus-5`'s advertised 128,000-token output, which today would quote over **$3** per review; if you are on an earlier version, upgrade rather than switching to a weaker reviewer.
+**That figure depends on the cap.** This gateway quotes from the request — input size plus the `max_tokens` asked for — and settles that amount whichever way the model answers, so a review that asks for room it never uses pays for it every time the gate fires. `reviewerMaxTokens` (512) is what keeps a two-field JSON verdict priced like one. Both figures are live 402 quotes for a real review request, read 2026-11-21. The default reviewer moved from Opus 5 to Opus 5.5 in 0.14.0, which is the newer model and costs less per review — Opus 5 quotes $0.0178 and $0.2194 on the same request; set `reviewerModel: anthropic/claude-opus-5` to keep it. Before 0.10.0 the reviewer inherited `claude-opus-5`'s advertised 128,000-token output, which today would quote over **$3** per review; if you are on an earlier version, upgrade rather than switching to a weaker reviewer.
 
-So during normal work it is invisible: no latency, no cost, no prompts. On a wallet it bills just under two cents on the rare command that deserves a second opinion. Both corpora are tests, so a rule that starts flagging `npm test` — or stops flagging `kubectl delete namespace` — fails CI rather than your session.
+So during normal work it is invisible: no latency, no cost, no prompts. On a wallet it bills about a cent and a half on the rare command that deserves a second opinion. Both corpora are tests, so a rule that starts flagging `npm test` — or stops flagging `kubectl delete namespace` — fails CI rather than your session.
 
 Not every dangerous action is a shell command. Writing `.git/hooks/pre-commit`, `.github/workflows/ci.yml`, or an npm `postinstall` runs code later — on the next commit, the next CI run with your secrets, the next `npm install` on someone else's machine. These are quieter than `rm -rf`, and worse for it: a user watching for destruction sees nothing happen at all. Measured before those rules existed, 2 of 10 were flagged.
 
@@ -326,7 +326,7 @@ The SDK keeps a Solana wallet at `~/.blockrun/.solana-session`; `npx -y @blockru
 
 Send the right chain's USDC to the right address. They are different keys on different curves, and USDC sent to the wrong one is gone — which is why a payment failure on this route always names the chain along with the address.
 
-$5 of USDC on Base covers about **2,500** calls at the $0.002 floor — and about **8** calls carrying a 100K-token context on Opus. A gate review on Opus sits between the two at $0.0178, so the same $5 is roughly 280 reviews. All three are the same $5; fund for the way you intend to use the route rather than for its floor.
+$5 of USDC on Base covers about **2,500** calls at the $0.002 floor — and about **8** calls carrying a 100K-token context on Opus. A gate review on the default reviewer sits between the two at $0.0144, so the same $5 is roughly 340 reviews. All three are the same $5; fund for the way you intend to use the route rather than for its floor.
 
 ### Or: neither
 
@@ -377,7 +377,7 @@ Off by default, and it only ever affects calls the harness itself marks as maint
 |---|---|---|
 | `enabled` | `false` | whether the automatic gate intercepts tool calls |
 | `reviewerProvider` | `blockrun` | provider route carrying the reviewer |
-| `reviewerModel` | `anthropic/claude-opus-5` | use a *different, stronger* model than the agent |
+| `reviewerModel` | `anthropic/claude-opus-5.5` | use a *different, stronger* model than the agent |
 | `timeoutMs` | `30000` | how long one review may take |
 | `reviewerMaxTokens` | `512` | output cap asked for per review, and billed whether or not it is used |
 | `onReviewerFailure` | `ask` | `ask` escalates to you; `deny` blocks (unattended runs) |

@@ -51,4 +51,4 @@
       config:
         enabled: false
         reviewerProvider: blockrun
-        reviewerModel: anthropic/claude-opus-5
+        reviewerModel: anthropic/claude-opus-5.5
