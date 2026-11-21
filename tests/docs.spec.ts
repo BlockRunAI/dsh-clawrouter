@@ -91,7 +91,7 @@ describe('the pricing claims agree with the pricing table', () => {
   }
 
   it.each([
-    ['deepseek/deepseek-chat', 'DeepSeek V4 Flash'],
+    ['deepseek/deepseek-chat', 'DeepSeek V4.1 Flash'],
     ['anthropic/claude-opus-5', 'Claude Opus 5'],
   ])('%s: the ~100K compaction figure sits between its ~22K and ~112K quotes', (model, label) => {
     for (const [lang, doc] of [['English', EN], ['Chinese', ZH]] as const) {

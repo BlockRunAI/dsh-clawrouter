@@ -57,11 +57,17 @@ let server: ReturnType<typeof createServer> | undefined
 let apiUrl = ''
 /** When set, the chat path answers with this status instead of streaming. */
 let refuseWithStatus: number | undefined
+/**
+ * When set, an unsigned chat request is answered `402` quoting this many
+ * µUSDC, in the gateway's own two-scheme shape; the signed retry then streams.
+ */
+let quoteMicroUsd: number | undefined
 
 beforeEach(async () => {
   bodies = []
   headers = []
   refuseWithStatus = undefined
+  quoteMicroUsd = undefined
   server = createServer((req, res) => {
     if (req.url?.endsWith('/models') === true) {
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -78,6 +84,29 @@ beforeEach(async () => {
     req.on('end', () => {
       bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)
       headers.push(req.headers)
+      if (quoteMicroUsd !== undefined && req.headers['payment-signature'] === undefined) {
+        // Copied from a live 402 on 2026-11-21: `exact` first, then `upto` at
+        // the same ceiling. Signing is local, so no chain is touched.
+        const option = {
+          network: 'eip155:8453',
+          amount: String(quoteMicroUsd),
+          asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          payTo: '0xe9030014F5DAe217d0A152f02A043567b16c1aBf',
+          maxTimeoutSeconds: 300,
+          extra: { name: 'USD Coin', version: '2' },
+        }
+        const required = {
+          x402Version: 2,
+          accepts: [{ scheme: 'exact', ...option }, { scheme: 'upto', ...option }],
+          resource: { url: `${apiUrl}/v1/chat/completions`, description: 'test', mimeType: 'application/json' },
+        }
+        res.writeHead(402, {
+          'content-type': 'application/json',
+          'payment-required': Buffer.from(JSON.stringify(required)).toString('base64'),
+        })
+        res.end(JSON.stringify(required))
+        return
+      }
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' } }] })}\n\n`)
       res.write(`data: ${JSON.stringify({ choices: [{ finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } })}\n\n`)
@@ -305,6 +334,49 @@ describe('the model that answered is read off the wire', () => {
     const chunks = await run(adapter())
     expect(chunks.filter(c => c.type === 'text-delta').map(c => c.text).join('')).toBe('ok')
     expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+  })
+})
+
+describe('a wallet call is metered at what was signed for it', () => {
+  // Measured 2026-11-21: the gateway quotes list price on the whole max_tokens
+  // requested, so an `anthropic/claude-opus-5` call at this route's default
+  // 8,192-token cap is quoted 216130 µUSDC. The meter multiplied a configured
+  // $0.002 by the call count, which reported one percent of that.
+
+  it('reports the quote the payment was signed against, not the configured fee', async () => {
+    quoteMicroUsd = 216_130
+    const meter = new SpendMeter(0.002)
+    const chunks = await run(adapter(undefined, meter))
+    expect(chunks.filter(c => c.type === 'text-delta').map(c => c.text).join('')).toBe('ok')
+    // Two requests on the wire: the unsigned one that drew the 402, and the
+    // retry carrying the signature.
+    expect(bodies).toHaveLength(2)
+    expect(headers[1]?.['payment-signature']).toBeDefined()
+    const summary = meter.summary()
+    expect(summary.basis).toBe('per-request')
+    expect(summary.totalUsd).toBeCloseTo(0.21613, 10)
+    expect(summary.estimatedCalls).toBe(0)
+  })
+
+  it('sums different quotes rather than averaging them into one figure', async () => {
+    const meter = new SpendMeter(0.002)
+    const instance = adapter(undefined, meter)
+    quoteMicroUsd = 216_130
+    await run(instance)
+    quoteMicroUsd = 14_530
+    await run(instance)
+    expect(meter.summary().totalUsd).toBeCloseTo(0.21613 + 0.01453, 10)
+    expect(meter.summary().estimatedCalls).toBe(0)
+  })
+
+  it('falls back to the configured fee, and counts it as an estimate, when nothing was signed', async () => {
+    // A 200 with no 402 means the SDK booked nothing. Reporting that as free
+    // would under-report a paid model, so the configured figure stands in and
+    // the summary says how many calls it covers.
+    const meter = new SpendMeter(0.002)
+    await run(adapter(undefined, meter))
+    expect(meter.summary().totalUsd).toBe(0.002)
+    expect(meter.summary().estimatedCalls).toBe(1)
   })
 })
 

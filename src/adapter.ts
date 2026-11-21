@@ -252,9 +252,19 @@ export class BlockrunAdapter extends LlmAdapter {
     // per-chain function said what a request costs on their deployment, and
     // quietly overriding it would make that constructor argument a decoration.
     const feeUsd = this.#options.requestFee?.(auth)
-    const pricing: CallPricing = auth.mode === 'api-key'
-      ? { kind: 'per-token', ...ratesFor(this.#options.catalog, model) }
-      : { kind: 'per-request', ...feeUsd === undefined ? {} : { feeUsd } }
+    // A function rather than a value, because the half that matters is not
+    // known yet: the payment is signed inside `client.stream()`, on the 402
+    // that answers the first request. Usage is recorded from the terminal
+    // flush, by which point the SDK has booked what it signed.
+    const pricing = (): CallPricing => {
+      if (auth.mode === 'api-key') return { kind: 'per-token', ...ratesFor(this.#options.catalog, model) }
+      const signedUsd = signedAmount(client)
+      return {
+        kind: 'per-request',
+        ...feeUsd === undefined ? {} : { feeUsd },
+        ...signedUsd === undefined ? {} : { signedUsd },
+      }
+    }
 
     const translator = new StreamTranslator()
     const iterator = client.stream<BlockrunStreamChunk>(CHAT_PATH, body)[Symbol.asyncIterator]()
@@ -285,13 +295,13 @@ export class BlockrunAdapter extends LlmAdapter {
         if (servedModel === undefined && typeof served === 'string' && served.length > 0 && served !== model) {
           servedModel = served
         }
-        yield * this.#metered(model, free, servedModel, pricing, translator.accept(next.value))
+        yield * this.#metered(model, free, servedModel, pricing(), translator.accept(next.value))
       }
       // The terminal flush is metered too, and it is the one that counts: the
       // translator BUFFERS usage and emits it from `end()`, so watching only
       // the per-chunk output recorded nothing at all. It is also the flush that
       // sees the final `servedModel`, since usage arrives last.
-      yield * this.#metered(model, free, servedModel, pricing, translator.end())
+      yield * this.#metered(model, free, servedModel, pricing(), translator.end())
     } finally {
       // Terminating the generator releases the SDK's reader. The in-flight
       // HTTP request is not itself cancellable until `BlockrunClient.stream`
@@ -501,6 +511,38 @@ type PaymentContext =
 interface StreamingClient {
   stream: <T>(path: string, body?: Record<string, unknown>) => AsyncIterable<T>
   getWalletAddress: () => string | Promise<string>
+  getSpending: () => { totalUsd: number }
+}
+
+/**
+ * What this request's payment was signed for, when the SDK can say.
+ *
+ * One client is built per request, so its running total IS this call's
+ * amount: `BlockrunClient.stream` and `SolanaLLMClient.stream` both book the
+ * figure they signed from the 402 before the first frame is yielded.
+ *
+ * Read rather than assumed, because the assumption stopped holding. Until the
+ * gateway's 2026-11 repricing a default call quoted close enough to the flat
+ * `requestFeeUsd` that multiplying it by the call count was a usable floor.
+ * Measured 2026-11-21, the quote is list price on the whole `max_tokens`
+ * requested: `anthropic/claude-opus-5` at this route's default 8,192-token cap
+ * quotes $0.2161 against a configured $0.002, so `/spend` reported one percent
+ * of what a session on a strong model actually authorized.
+ *
+ * Undefined — never zero — when nothing can be read: `getSpending()` throws
+ * under an account key, and a request the gateway answered `200` with no 402
+ * signed nothing. The meter then falls back to the configured figure and says
+ * so, which under-reports rather than claiming a paid call was free.
+ * @param client - the per-request SDK client.
+ * @returns the signed amount in USD, or undefined when none was booked.
+ */
+function signedAmount(client: StreamingClient): number | undefined {
+  try {
+    const total = client.getSpending().totalUsd
+    return typeof total === 'number' && Number.isFinite(total) && total > 0 ? total : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**

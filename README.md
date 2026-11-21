@@ -6,7 +6,7 @@
 
 <p>DeepSeek is fast and cheap — keep it for the loop.<br><br>
 <strong>This adds what it cannot do: a stronger model reviews the dangerous command before it runs.</strong><br><br>
-<em><!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> models from one credential — an API key from <a href="https://user.blockrun.ai">user.blockrun.ai</a>, or a Solana or Base wallet if you would rather not sign up.</em></p>
+<em><!-- br:models.chatVisible -->96<!-- /br:models.chatVisible --> models from one credential — an API key from <a href="https://user.blockrun.ai">user.blockrun.ai</a>, or a Solana or Base wallet if you would rather not sign up.</em></p>
 
 <br>
 
@@ -33,7 +33,7 @@ English | [中文](https://github.com/BlockRunAI/dsh-clawrouter/blob/main/docs/R
 
 </div>
 
-> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> models) is reachable from **one credential**: a BlockRun API key from [user.blockrun.ai](https://user.blockrun.ai), billed at exact token usage — or, if you would rather not sign up for anything, a Solana or Base wallet paying per request in USDC over [x402](https://x402.org). MIT licensed.
+> **dsh-clawrouter** is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that puts a stronger model in front of your agent's dangerous actions. When the agent proposes `rm -rf ~`, a reviewer model reads it and answers allow / deny / ask — enforced by the real tool executor, not by a prompt. It also registers a BlockRun provider route, so the reviewer (and any of <!-- br:models.chatVisible -->96<!-- /br:models.chatVisible --> models) is reachable from **one credential**: a BlockRun API key from [user.blockrun.ai](https://user.blockrun.ai), billed at exact token usage — or, if you would rather not sign up for anything, a Solana or Base wallet paying per request in USDC over [x402](https://x402.org). MIT licensed.
 
 ```sh
 dsh plugin --profile web add dsh-clawrouter
@@ -113,13 +113,13 @@ Measured, because this is the question that decides whether you keep it enabled:
 | Misses dangerous work | **none** of 39, across git, containers, clusters, cloud storage, databases, and host state |
 | Catches files that execute later | git hooks, CI workflows, shell startup files, launch agents, `.gitconfig`, `.env`, npm `postinstall`, sandbox escalation — 10 of 10, 0 false positives across 15 ordinary file edits |
 | Survives evasion | `\rm -rf /`, `command rm`, `env rm`, `eval "rm -rf $DIR"`, `bash -c "…"`, `\| xargs rm`, and heredocs piped into a shell |
-| Cost when it does fire | **$0.0057** on `claude-opus-5`, at the 512-token reviewer cap — $0.0249 without it |
+| Cost when it does fire | **$0.0178** on `claude-opus-5` from a Base wallet, at the 512-token reviewer cap — $0.2194 without it. On an API key it is billed on the tokens the verdict actually used, not on the cap |
 | Latency when it does fire | ~3s |
 | What the reviewer sees | ~356 tokens — the flagged call, not your conversation |
 
-**That figure depends on the cap.** This gateway quotes from the request — input size plus the `max_tokens` asked for — and settles that amount whichever way the model answers, so a review that asks for room it never uses pays for it every time the gate fires. `reviewerMaxTokens` (512) is what keeps a two-field JSON verdict priced like one. Before 0.10.0 the reviewer inherited `claude-opus-5`'s advertised 128,000-token output and cost **$0.28–0.33** per review; if you are on an earlier version, upgrade rather than switching to a weaker reviewer.
+**That figure depends on the cap.** This gateway quotes from the request — input size plus the `max_tokens` asked for — and settles that amount whichever way the model answers, so a review that asks for room it never uses pays for it every time the gate fires. `reviewerMaxTokens` (512) is what keeps a two-field JSON verdict priced like one. Both figures are live 402 quotes for a real review request, read 2026-11-21; they are roughly three times what this section said before, because the gateway now quotes list price on the whole cap where it used to quote about a tenth of it. Before 0.10.0 the reviewer inherited `claude-opus-5`'s advertised 128,000-token output, which today would quote over **$3** per review; if you are on an earlier version, upgrade rather than switching to a weaker reviewer.
 
-So during normal work it is invisible: no latency, no cost, no prompts. It bills roughly half a cent on the rare command that deserves a second opinion. Both corpora are tests, so a rule that starts flagging `npm test` — or stops flagging `kubectl delete namespace` — fails CI rather than your session.
+So during normal work it is invisible: no latency, no cost, no prompts. On a wallet it bills just under two cents on the rare command that deserves a second opinion. Both corpora are tests, so a rule that starts flagging `npm test` — or stops flagging `kubectl delete namespace` — fails CI rather than your session.
 
 Not every dangerous action is a shell command. Writing `.git/hooks/pre-commit`, `.github/workflows/ci.yml`, or an npm `postinstall` runs code later — on the next commit, the next CI run with your secrets, the next `npm install` on someone else's machine. These are quieter than `rm -rf`, and worse for it: a user watching for destruction sees nothing happen at all. Measured before those rules existed, 2 of 10 were flagged.
 
@@ -137,37 +137,37 @@ What this route has cost since the process started — total, per model, tokens 
 
 **On an API key:** priced from the tokens the provider reported, at the catalog's published per-million rates. That is the same basis your account is invoiced on — no per-call fee, no minimum — so the figure lines up with [`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) rather than approximating it. Measured against the live account host: `openai/gpt-5.5` on 16 input / 17 output tokens reports `$0.000590`, which is `16/1M × $5 + 17/1M × $30`. A model the catalog publishes no rate for is counted as **unpriced** and named as such, never silently as `$0`.
 
-**On a wallet:** the flat quote the gateway gave, per call. The two chains are quoted differently for the same request — measured 2026-09-05, `2000` µUSDC on Base against `1000` on Solana — so `/spend` uses the figure for the chain the call actually settled on (`requestFeeUsd`, `solanaRequestFeeUsd`). A session that used both reports `mixed` and explains both.
+**On a wallet:** the amount each call's payment was actually signed for. Since 0.13.0 `/spend` reads that figure from the payment itself instead of multiplying a configured per-request price by the call count, because the two stopped resembling each other: a default call on `claude-opus-5` is quoted $0.2161 and was being reported as $0.002. The sentence under the total says so — *each wallet figure above is the amount this process actually signed* — and when a call's signed amount could not be read it falls back to `requestFeeUsd` / `solanaRequestFeeUsd`, counts that call as an estimate, and says how many there were. A session that used both a wallet and an API key reports `mixed` and explains both.
 
 Everything below this line describes the **wallet** path, whose numbers are quotes rather than usage. Before 0.11.0 those numbers were reported for API-key deployments too, which overstated a session of small calls by orders of magnitude.
 
-**You pay for what you request, not what you get.** The gateway quotes from the request — input size plus the `max_tokens` you ask for — and settles that quoted amount whichever way the model answers. Measured against production:
+**You pay for what you request, not what you get.** The gateway quotes from the request — input size plus the `max_tokens` you ask for — and settles that quoted amount whichever way the model answers. Measured against production on 2026-11-21, on the Base gateway:
 
 | `max_tokens` requested | `claude-opus-5` | `deepseek-chat` |
 |---|---|---|
 | 16 | $0.0020 | $0.0020 |
-| 1,000 | $0.0036 | $0.0020 |
-| 8,000 | $0.0211 | $0.0020 |
-| 60,000 | $0.1511 | $0.0027 |
+| 1,000 | $0.0273 | $0.0020 |
+| 8,000 | $0.2111 | $0.0034 |
+| 60,000 | $1.5761 | $0.0186 |
 
 Two things follow, and the second one costs real money.
 
-**There is a floor of $0.002** — a $0.001 minimum payment plus a flat $0.001 transaction fee. Below it everything quotes the same, which is why `deepseek-chat` barely moves in that table: it is cheap enough that even 8,000 output tokens stays under the floor. An earlier version of this section concluded from exactly that observation that billing was per request rather than per token. It was measured only on `deepseek-chat`, the cheapest model on the route, where the floor hides the rate entirely.
+**There is a floor of $0.002 on Base and $0.001 on Solana** — a $0.001 minimum payment, plus a flat $0.001 transaction fee that Base adds to every quote and Solana does not. Below the floor everything quotes the same, which is why `deepseek-chat` does not move until 8,000 tokens in that table. Above it the quote is plain arithmetic: list price on the input the gateway counts plus list price on the **whole** `max_tokens` requested, plus the 5% platform fee the catalog publishes, plus that flat fee. Until late 2026 the output half was quoted at about a tenth of the cap, which is why every figure in this section used to be smaller; an earlier version still concluded from `deepseek-chat` alone that billing was per request rather than per token, because on the cheapest model the floor hides the rate entirely.
 
-**A large `max_tokens` is billed even when the reply is short.** This is why `defaultMaxTokens` is capped at `maxOutputCeiling` (8,192) rather than taken from a model's advertised `max_output`. Left uncapped, `claude-opus-5` advertises 128,000, and a request carrying that default quotes **$0.3211** — against $0.0216 with no cap at all and $0.0036 capped at 1,000. Eighty-nine times the cost, decided by a field the caller never set. Raise `maxOutputCeiling` when a workload genuinely needs long replies; you are then paying for them deliberately.
+**A large `max_tokens` is billed even when the reply is short.** This is why `defaultMaxTokens` is capped at `maxOutputCeiling` (8,192) rather than taken from a model's advertised `max_output`. Left uncapped, `claude-opus-5` advertises 128,000, and a request carrying that default quotes **$3.3611** — against $0.2161 at the 8,192 ceiling and $0.0273 capped at 1,000. Fifteen times the cost of the ceiling, decided by a field the caller never set. A request that sends no `max_tokens` at all is quoted exactly as if it had asked for 8,192, so on a wallet every unspecified call to a strong model starts at twenty-odd cents: set `maxTokens` on calls you know are short, or use an API key, which bills the tokens produced and ignores the cap. Raise `maxOutputCeiling` when a workload genuinely needs long replies; you are then paying for them deliberately.
 
 **Input size drives the other half of the quote.** The same request at growing prompt sizes, `max_tokens` held small:
 
 | Model | small | ~22K in | ~112K in |
 |---|---|---|---|
-| `openai/gpt-4.1-nano` | $0.002 | $0.005 | $0.023 |
-| `deepseek/deepseek-chat` | $0.002 | $0.007 | $0.031 |
-| `google/gemini-3.5-flash` | $0.002 | $0.066 | $0.325 |
-| `anthropic/claude-opus-5` | $0.002 | $0.217 | **$1.081** |
+| `openai/gpt-6-luna` | $0.002 | $0.003 | $0.013 |
+| `deepseek/deepseek-chat` | $0.002 | $0.004 | $0.018 |
+| `google/gemini-3.5-flash` | $0.002 | $0.036 | $0.178 |
+| `anthropic/claude-opus-5` | $0.002 | $0.117 | **$0.589** |
 
-Everything starts at the same floor and then diverges by more than thirty-fold. A coding agent holding a 100K-token context pays roughly fifteen times the floor per call on DeepSeek — and five hundred times on Opus. `/spend` says so whenever your average call carries a large context, and points you at your own model's rate rather than one number. It is also blind to a request that failed after paying. Your wallet balance is the authority.
+Everything starts at the same floor and then diverges by more than forty-fold. A coding agent holding a 100K-token context pays roughly eight times the floor per call on DeepSeek — and more than two hundred and sixty times on Opus, before the output cap is added on top. `/spend` now carries each of those amounts as signed; where it had to estimate instead, it says so and warns whenever the average call carries a large context. It is also blind to a request that failed after paying. Your wallet balance is the authority.
 
-**A free model is $0, and `/spend` says so.** The <!-- br:models.free -->7<!-- /br:models.free --> models the catalog bills as `free` never reach the x402 handshake — the gateway answers them with `200` and no `402`, so no quote is signed and nothing settles. Their rows read `$0  N calls  (free tier — no payment was signed)`, and the large-context warning below is computed from the paid calls alone, since a call that was never quoted cannot be under-quoted. Before 0.10.3 every call was charged the flat request price regardless, so a session spent trying the free tier reported a cost that was entirely invented.
+**A free model is $0, and `/spend` says so.** The <!-- br:models.free -->9<!-- /br:models.free --> models the catalog bills as `free` never reach the x402 handshake — the gateway answers them with `200` and no `402`, so no quote is signed and nothing settles. Their rows read `$0  N calls  (free tier — no payment was signed)`, and the large-context warning below is computed from the paid calls alone, since a call that was never quoted cannot be under-quoted. Before 0.10.3 every call was charged the flat request price regardless, so a session spent trying the free tier reported a cost that was entirely invented.
 
 **It also says when a different model answered.** The gateway substitutes silently behind the free tier — a request for `nvidia/nemotron-3-ultra-550b` is answered by a 30B about one time in three — and the substitute is named on the chunks it streams. `/spend` prints it under the row for the model you asked for:
 
@@ -177,11 +177,11 @@ nvidia/nemotron-3-nano-omni-30b-a3b-reasoning  $0  3 calls  (free tier — no pa
     answered by nvidia/nemotron-3-super-120b on 2 of 3 — the gateway substituted a different model
 ```
 
-The call still counts against the id you requested rather than the one that answered, because this meter prices every call at the same flat figure — which row it lands on cannot move the total, and the id you chose is the one you would recognize.
+The call still counts against the id you requested rather than the one that answered, because the payment was signed for the request you made — which row it lands on cannot move the total, and the id you chose is the one you would recognize.
 
 Reading a 402 quote is free, so every figure above is reproducible without spending anything.
 
-The default `requestFeeUsd` is `0.002` because that is what the gateway quotes: a 402 for a ~17-token request returns `{"amount":"0.002000"}`. BlockRun's published pricing page currently says $0.001.
+The default `requestFeeUsd` is `0.002` because that is the floor the Base gateway quotes: a 402 for a ~17-token request returns `{"amount":"0.002000"}`. Since 0.13.0 it is only the fallback for a call whose signed amount could not be read. BlockRun's published pricing page currently says $0.001.
 
 ### 3. `/review`
 
@@ -227,6 +227,8 @@ The last row is the one to understand before widening the list yourself. Those t
 
 `gpt-5.6-luna-pro` moved the other way, though not for the reason it looks like. It was not an image failure at all: the catalog priced it below what OpenAI charges, the gateway derives its upstream cost ceiling from that price, so every request matched no endpoint and — with no fallback declared for it — failed outright. Repricing it fixed the model, and the image happened to work all along. The separate fix for the three `pro` entries above is still open, which is why they still refuse.
 
+**The roster has moved since that run, and the list has not caught up on purpose.** Checked 2026-11-21, the catalog tags 63 chat models `vision`, up from 40. `moonshot/kimi-k3` and `nvidia/llama-3.2-11b-vision` are gone, as is `nemotron-3-nano-30b`, the substitute named in the last row. Thirty tagged models have never been measured — the GPT-6 family, `gpt-5.1`, Claude Opus 5.5, Sonnet 5.5 and Fable 5.1/5.2, Gemini 4 and `gemini-3.8-flash`, `grok-4.6`/`4.7`, `kimi-k3.1-pro`, `mistral-large-4`, DeepSeek's `deepseek-chat`, `deepseek-reasoner` and `deepseek-v4.1-flash`, and three free NVIDIA entries — so none of them is offered image input until `npm run probe:vision` says so, which is the rule doing its job rather than an oversight. The three free ones were probed that day with no credential and came back `RATE_LIMIT` on most colours, which is not a verdict either way. The default is therefore the 33 earlier passes still listed; add any other to `visionModels` once you have measured it.
+
 The first measurement (2026-08-16) was far worse: OpenAI returned HTTP 400 after payment, xAI 503, and Anthropic streamed `[Error: 400 {"message":"Could not process image"}]` as assistant text, so the harness saw an ordinary successful turn and the agent acted on the error string as though the model wrote it. The gateway has since fixed all three, and this plugin still detects that exact shape — the whole message being nothing but a relayed error — and finishes the request as a failure with the status mapped as if it had arrived as one. An answer that merely mentions an error, or a turn that also called a tool, is left alone. So a model is offered image input only when the gateway tags it `vision` **and** it appears in `visionModels`, which defaults to the measured set. Both signals must agree — the tag alone over-claims, and the list alone would keep claiming vision for a model the gateway has since retagged.
 
 Widen it yourself as you verify others; that is a config change, not a release here.
@@ -239,7 +241,7 @@ Reasoning models get `high` and `max`, declared per model from the catalog's `re
 
 Asking a model that does not reason at all is a different case, and is refused **locally, before paying**: `openai/gpt-4o` charges and then rejects `reasoning_effort` outright. The catalog says which models qualify, so that costs nothing to discover.
 
-### 7. <!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> models from one credential
+### 7. <!-- br:models.chatVisible -->96<!-- /br:models.chatVisible --> models from one credential
 
 Registers a `blockrun` provider route reaching every model BlockRun serves. That matters most for the ones DeepSeek does not — Claude, GPT, Gemini, Grok — which is exactly what a reviewer needs.
 
@@ -255,7 +257,7 @@ There are three ways to pay for it, and you pick one. They are not three doors o
 | Signup | Google sign-in | none at all | none at all |
 | Config key | `apiKeyEnv` | `solanaWalletKeyEnv` | `walletKeyEnv` |
 
-**They are checked in that order.** The API key wins because it is the credential you chose on purpose — paying from a wallet you merely happen to have exported would spend money on a call you meant to put on the account. **Solana is checked before Base:** a deployment holding both wallets has said which chains it *can* pay on, not which it prefers, and this route picks Solana. Both gateways serve the same catalog, verified id for id.
+**They are checked in that order.** The API key wins because it is the credential you chose on purpose — paying from a wallet you merely happen to have exported would spend money on a call you meant to put on the account. **Solana is checked before Base:** a deployment holding both wallets has said which chains it *can* pay on, not which it prefers, and this route picks Solana. The two wallet gateways no longer serve the same catalog: checked 2026-11-21, three ids are only on Base (`anthropic/claude-fable-5.2`, `openai/o3-mini`, `openai/o4-mini`) and three only on Solana (`meta/muse-spark-1.3`, `meta/muse-wonder-1.0`, `reflection/beam-1.0-501b-a23b`), and the account host lists one of its own (`openai/gpt-6-luna-fast`). This route reads the catalog from the host your credential is valid on, so the selector shows what you can actually call.
 
 Adding a credential does not disturb an existing deployment: set none of the three and nothing about your setup changes.
 
@@ -265,7 +267,7 @@ Paying on Solana needs `@solana/web3.js` and `@solana/spl-token`. They are optio
 npm install @solana/web3.js @solana/spl-token
 ```
 
-<!-- br:models.free -->7<!-- /br:models.free --> models are free on every path. On either wallet gateway they need no credential at all — both serve a `billing_mode: "free"` model unpaid, so this route sends one without asking for a key. On `api.blockrun.ai` the key is still sent, because that host answers an unauthenticated request `401` whatever the model costs. The list is read live from the catalog rather than pinned here, because it changes faster than this plugin releases.
+<!-- br:models.free -->9<!-- /br:models.free --> models are free on every path. On either wallet gateway they need no credential at all — both serve a `billing_mode: "free"` model unpaid, so this route sends one without asking for a key. On `api.blockrun.ai` the key is still sent, because that host answers an unauthenticated request `401` whatever the model costs. The list is read live from the catalog rather than pinned here, because it changes faster than this plugin releases.
 
 ## Quick Start
 
@@ -309,11 +311,11 @@ The SDK keeps a Solana wallet at `~/.blockrun/.solana-session`; `npx -y @blockru
 
 Send the right chain's USDC to the right address. They are different keys on different curves, and USDC sent to the wrong one is gone — which is why a payment failure on this route always names the chain along with the address.
 
-$5 of USDC on Base covers about **2,500** gate reviews, which run at the $0.002 floor — and about **5** calls carrying a 100K-token context on Opus. Both figures are the same $5; fund for the way you intend to use the route rather than for its floor.
+$5 of USDC on Base covers about **2,500** calls at the $0.002 floor — and about **8** calls carrying a 100K-token context on Opus. A gate review on Opus sits between the two at $0.0178, so the same $5 is roughly 280 reviews. All three are the same $5; fund for the way you intend to use the route rather than for its floor.
 
 ### Or: neither
 
-The <!-- br:models.free -->7<!-- /br:models.free --> models the catalog bills as `free` need no credential at all on either wallet gateway. Both answer them with `200` and never open the x402 handshake, so `dsh-clawrouter` does not ask for a key before sending one. Pick `nvidia/nemotron-3.5-lightning` or `cohere/north-mini-code` and it works with nothing exported. Every other model still fails with `MISSING_CREDENTIAL` until you set a credential — the exemption is per model, read from the catalog, not a general loosening.
+The <!-- br:models.free -->9<!-- /br:models.free --> models the catalog bills as `free` need no credential at all on either wallet gateway. Both answer them with `200` and never open the x402 handshake, so `dsh-clawrouter` does not ask for a key before sending one. Pick `nvidia/nemotron-3.5-lightning` or `cohere/north-mini-code` and it works with nothing exported. Every other model still fails with `MISSING_CREDENTIAL` until you set a credential — the exemption is per model, read from the catalog, not a general loosening.
 
 ### About the credential itself
 
@@ -343,7 +345,7 @@ All three keys are **references** in configuration (`apiKeyEnv`, `solanaWalletKe
 
 The harness compacts long sessions by summarizing them — and it does that on **whatever model the conversation is using**. On a flagship model that means paying flagship input rates to summarize, repeatedly, for the whole session.
 
-A ~100K-token compaction runs about **$0.90 on Claude Opus 5** and about **$0.026 on DeepSeek V4 Flash** — read from live 402 quotes at that size, consistent with the table above. Summarizing is a job a cheap model does well, and those calls share no prefix with your conversation — so moving them forfeits no prompt-cache hit:
+A ~100K-token compaction runs about **$0.53 on Claude Opus 5** and about **$0.016 on DeepSeek V4.1 Flash** for the input alone — read from live 402 quotes at that size, consistent with the table above — and the output cap is quoted on top, which at the default 8,192 adds another $0.21 on Opus and about a tenth of a cent on DeepSeek. Summarizing is a job a cheap model does well, and those calls share no prefix with your conversation — so moving them forfeits no prompt-cache hit:
 
 ```yaml
 - id: blockrun-llm
@@ -369,9 +371,9 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 
 ## Honest notes
 
-- **This will not make DeepSeek cheaper.** Each request is priced from its own 402 quote — $0.002 at small sizes, climbing with input — and BlockRun does not price DeepSeek's cache-hit discount. A cache-warm agent turn costs DeepSeek about $0.000056 directly against roughly $0.007 here at 22K input tokens. Keep your DeepSeek key for the loop; use this for what DeepSeek cannot do.
-- **The free tier is a smoke test, not a workhorse.** <!-- br:models.free -->7<!-- /br:models.free --> models are free right now, and they are free because someone else's terms pay for them: the NVIDIA entries may use prompts for service improvement, so do not point them at a private codebase, and never use one as the reviewer. It also turns over fast — on 2026-08-30 NVIDIA retired four of the five free models in a single sweep, and the replacements arrived the same day. This route reads the list live, so it follows those changes without a release here, but a free model you pinned last week may simply not be there.
-- **A free model can answer as a different model, and `/spend` will tell you.** The gateway keeps a fallback cascade behind the free tier and substitutes without failing. Measured: every request for `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` — the free tier's only vision model — was answered by something else, and one request in three for `nvidia/nemotron-3-ultra-550b`, the largest free model listed, came back from a 30B. One of the substitutes, `nvidia/nemotron-3-super-120b`, is not in the public catalog at all. Since 0.10.4 this route reads the `model` field off every chunk and names the substitute under the row in `/spend`, against the id you asked for rather than replacing it. It is a report, not a guard: the reply is real and it is delivered. Reported upstream as BlockRunAI/blockrun#450.
+- **This will not make DeepSeek cheaper.** Each request is priced from its own 402 quote — $0.002 at small sizes, climbing with input — and BlockRun does not price DeepSeek's cache-hit discount. A cache-warm agent turn costs DeepSeek about $0.000056 directly against roughly $0.004 here at 22K input tokens. Keep your DeepSeek key for the loop; use this for what DeepSeek cannot do.
+- **The free tier is a smoke test, not a workhorse.** <!-- br:models.free -->9<!-- /br:models.free --> models are free right now, and they are free because someone else's terms pay for them: the NVIDIA entries may use prompts for service improvement, so do not point them at a private codebase, and never use one as the reviewer. It also turns over fast — on 2026-08-30 NVIDIA retired four of the five free models in a single sweep, and the replacements arrived the same day. This route reads the list live, so it follows those changes without a release here, but a free model you pinned last week may simply not be there.
+- **A free model can answer as a different model, and `/spend` will tell you.** The gateway keeps a fallback cascade behind the free tier and substitutes without failing. Measured: every request for `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` — then the free tier's only vision model — was answered by something else, and one request in three for `nvidia/nemotron-3-ultra-550b`, the largest free model listed, came back from a 30B. It has not stopped: on 2026-11-21 a request for `nvidia/nemotron-3.5-lightning` on the Solana gateway was answered by `nvidia/nemotron-3-super-120b`, and an anonymous caller is rate-limited on most free requests. Since 0.10.4 this route reads the `model` field off every chunk and names the substitute under the row in `/spend`, against the id you asked for rather than replacing it. It is a report, not a guard: the reply is real and it is delivered. Reported upstream as BlockRunAI/blockrun#450.
 - **A review costs a model call.** It runs only on flagged calls, with a 30s ceiling.
 - **The reviewer sees the flagged tool call**, not your whole repository.
 
@@ -384,9 +386,9 @@ Mounting the route does **not** change your default model. `dsh-base` keeps `dee
 - **Solana needs two optional peer dependencies.** `@solana/web3.js` and `@solana/spl-token` are optional peers rather than dependencies, because `@solana/spl-token` pulls in `bigint-buffer`, whose native `toBigIntLE()` has an unpatched buffer overflow with no fixed release anywhere. Making them optional keeps that out of the lockfile of every API-key and Base-only deployment. Install them yourself for the Solana path; a Solana request without them fails naming the packages.
 - **The `model` a response reports is not always the id you asked for, and not always a substitution.** OpenAI-family models echo the vendor-versioned id — a request for `openai/gpt-5.5` comes back as `gpt-5.5-2026-04-23`, and `anthropic/claude-sonnet-4-6` as `anthropic/claude-sonnet-4.6`. `/spend`'s substitution line reads those as a different model answering. It is cosmetic and it predates the API-key path — measured identical on both hosts — but it does mean the line can appear when nothing was actually substituted.
 - **Smart routing (`blockrun/auto`) is not wired up**, and not for lack of a router. A virtual model has to report one context window, and the harness sizes compaction from it: report the largest candidate and a turn routed to a smaller model overflows with compaction never firing; report the smallest and every session compacts far too early. Until that has an honest answer, pin a model id — `auxiliaryModel` already moves the expensive maintenance calls, which is where the savings actually were.
-- **Compaction may fire earlier than it needs to.** This route reports the context window the gateway's model catalog declares. Measured against the live gateway, `openai/gpt-4.1-nano` accepted a 450,037-token prompt and recalled a marker from the very first line — no truncation, but 3.5x the 128,000 the catalog states. The harness sizes compaction from the declared figure, so a session can compact while the model would still have taken the whole thing. Reported upstream; this plugin reports what the catalog says rather than guessing higher, because over-claiming would trade early compaction for silent overflow.
+- **Compaction may fire earlier than it needs to.** This route reports the context window the gateway's model catalog declares. Measured against the live gateway, `openai/gpt-4.1-nano` (since delisted) accepted a 450,037-token prompt and recalled a marker from the very first line — no truncation, but 3.5x the 128,000 the catalog states. The harness sizes compaction from the declared figure, so a session can compact while the model would still have taken the whole thing. Reported upstream; this plugin reports what the catalog says rather than guessing higher, because over-claiming would trade early compaction for silent overflow.
 - **Context overflow is detected by request size, not by the error text.** A real overflow comes back from the gateway as `{"message":"API request failed"}` — the provider's wording is sanitized away, so the usual text detectors match nothing. After a 400, a request larger than the model's declared window is therefore treated as an overflow so compaction can recover. The text detectors still run first, so this corrects itself if the gateway stops sanitizing.
-- **Prior-turn reasoning is not sent back.** DeepSeek's thinking-mode guide says `reasoning_content` should be returned on tool-call turns, but this one route serves <!-- br:models.chatVisible -->75<!-- /br:models.chatVisible --> models from many vendors, and a field one of them requires is a field another may reject. Multi-step tool use on a reasoning model may be slightly degraded as a result; please report it if you hit it.
+- **Prior-turn reasoning is not sent back.** DeepSeek's thinking-mode guide says `reasoning_content` should be returned on tool-call turns, but this one route serves <!-- br:models.chatVisible -->96<!-- /br:models.chatVisible --> models from many vendors, and a field one of them requires is a field another may reject. Multi-step tool use on a reasoning model may be slightly degraded as a result; please report it if you hit it.
 
 ## Development
 

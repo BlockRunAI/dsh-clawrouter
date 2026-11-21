@@ -15,6 +15,7 @@ import {
   COLOURS,
   judgeAnswer,
   MAX_TOKENS,
+  mergeVerified,
   png,
   quoteUsd,
   selectCandidates,
@@ -204,5 +205,34 @@ describe('the cost estimate', () => {
 
   it('does not crash on a model the catalog does not price', () => {
     expect(quoteUsd({ id: 'x', billing_mode: 'paid' })).toBe(0.002)
+  })
+})
+
+describe('the list that gets pasted back', () => {
+  // The first version merged "already verified" with "passed this run" and
+  // nothing else, so the list could only ever grow. On 2026-11-21 it still
+  // named `moonshot/kimi-k3`, which the catalog had stopped serving.
+  const entries = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+
+  it('adds what passed and keeps what was not re-measured', () => {
+    expect(mergeVerified(entries, { verified: new Set(['a']), passed: ['c'], measured: ['b', 'c'] }))
+      .toEqual(['a', 'c'])
+  })
+
+  it('drops an id the catalog no longer lists', () => {
+    expect(mergeVerified(entries, { verified: new Set(['a', 'gone/model']), passed: [], measured: [] }))
+      .toEqual(['a'])
+  })
+
+  it('takes out a listed model that was re-measured and failed', () => {
+    // A `--models=a` re-check exists to change a verdict. Keeping `a` because
+    // it used to pass would make the re-check unable to say anything.
+    expect(mergeVerified(entries, { verified: new Set(['a', 'b']), passed: [], measured: ['a'] }))
+      .toEqual(['b'])
+  })
+
+  it('keeps a listed model that was re-measured and passed again', () => {
+    expect(mergeVerified(entries, { verified: new Set(['a', 'b']), passed: ['a'], measured: ['a'] }))
+      .toEqual(['a', 'b'])
   })
 })

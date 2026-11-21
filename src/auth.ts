@@ -18,13 +18,16 @@
  * - **Base wallet** (an EVM private key) reaches `blockrun.ai/api` and does the
  *   same thing with an EIP-3009 authorization.
  *
- * Both wallet paths quote a flat per-request figure that settles whatever the
- * model then does, and both serve the same catalog — verified identical, id
- * for id, on 2026-09-05. What differs is the chain the USDC moves on and what
- * the gateway quotes for a call: `2000` (µUSDC) on Base against `1000` on
- * Solana, measured for the same request on the same model. That is not a
- * marketing line, it is what `/spend` has to know to report a total that is
- * not off by a factor of two.
+ * Both wallet paths quote each request up front and settle that quote
+ * whatever the model then does. They no longer serve the same catalog: it was
+ * identical id for id on 2026-09-05, and on 2026-11-21 three ids were only on
+ * Base and three only on Solana, which is why the catalog is read from the
+ * host the credential is valid on. What also differs is the chain the USDC
+ * moves on and what the gateway quotes: Base adds a flat $0.001 to every
+ * quote that Solana does not, so the floor is `2000` (µUSDC) against `1000`
+ * and every larger quote is `1000` apart, measured for the same requests on
+ * the same models. `/spend` reads the signed amount for that reason rather
+ * than assuming either.
  *
  * The credentials are mutually exclusive by construction — `BlockrunClient`
  * throws when given both a key and a wallet — so this module resolves exactly
@@ -173,10 +176,12 @@ export function freeTierKey(): string {
 /**
  * The catalog endpoint a resolved credential can read.
  *
- * `api.blockrun.ai/v1/models` answers `401` unauthenticated, so an API-key
- * deployment cannot share the wallet gateway's anonymous catalog read. It also
- * should not: the account's own listing is the one whose prices `/spend` is
- * about to bill from.
+ * An API-key deployment does not share the wallet gateway's anonymous catalog
+ * read: the account's own listing is the one whose prices `/spend` is about
+ * to bill from, and it is not identical to the wallet gateways'. The key is
+ * sent even though `api.blockrun.ai/v1/models` now answers an anonymous read
+ * `200` (it answered `401` until late 2026) — a read made for an account
+ * should be made as that account.
  * @param auth - the resolved credential.
  * @returns the `/v1` base and any headers the read needs.
  */

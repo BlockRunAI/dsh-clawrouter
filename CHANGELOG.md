@@ -4,6 +4,21 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## Unreleased
+
+### Fixed
+- **`/spend` on a wallet reported about one percent of what a session on a strong model actually authorized.** It multiplied a configured per-request price (`requestFeeUsd`, $0.002) by the call count. That was a usable floor while the gateway quoted a default call close to it, and it stopped being one when the gateway began quoting list price on the **whole** `max_tokens` a request asks for: measured 2026-11-21, one `anthropic/claude-opus-5` call at this route's default 8,192-token cap is quoted **$0.2161**, and `/spend` printed $0.002 for it. Each wallet call is now recorded at the amount its payment was actually signed for, read from the SDK after the 402 handshake. When that amount cannot be read the old figure stands in, the call is counted as an estimate, and the sentence under the total says how many there were — so the two kinds of number are never left looking alike. Account-key billing is unchanged; it was already priced from tokens.
+- **Every wallet price in both READMEs was stale, most of them low by a factor of three to ten.** All re-read from live 402 quotes, which cost nothing: a gate review on Opus at the 512-token cap is $0.0178, not $0.0057; a request carrying Opus's advertised 128,000-token output is $3.36, not $0.32; and the input half moved the other way, so a 112K-token prompt on Opus is $0.589 rather than $1.081. The funding advice follows: $5 is about 8 large-context Opus calls or about 280 gate reviews, not 2,500 reviews. If you sized a wallet from the old tables, re-read section 2.
+- **`npm run probe:vision` failed every free model when no credential was configured**, with `no BlockRun credential configured` on all three colours — which reads exactly like three vision failures. Its own header promised that free models need no wallet. It now sends a free model on the same throwaway key the plugin uses, and does so even when a real wallet is present, so a free probe cannot spend.
+- **The probe's pasted-back list could only grow.** It merged the existing list with whatever passed, so a delisted model stayed forever and a `--models=` re-check of a listed model that now fails could not remove it. It now drops ids the catalog no longer tags, and an id measured in the run is listed only if it passed in that run.
+
+### Changed
+- **`VERIFIED_VISION_MODELS` is 33, down from 34:** `moonshot/kimi-k3` was delisted. The catalog now tags 63 chat models `vision`, up from 40, and thirty of them — the GPT-6 family, Claude Opus 5.5 / Sonnet 5.5 / Fable 5.1 and 5.2, Gemini 4, `grok-4.6`/`4.7`, `kimi-k3.1-pro`, `mistral-large-4`, three DeepSeek entries and three free NVIDIA ones — have never been measured. None is offered image input until the probe measures it; add one to `visionModels` yourself once you have. The three free ones were probed without a credential and were rate-limited on most colours, which is not a verdict.
+- **The model counts are regenerated:** 96 chat models, 9 of them free (75 and 7 at 0.12.0). `brand-numbers.json` is re-synced from `blockrun.ai/brand/numbers.json`; it had not moved since the 70-model catalog.
+- **The two wallet gateways no longer serve the same catalog,** and the docs no longer say they do. Three ids are only on Base, three only on Solana, and the account host lists one of its own. Nothing changes in the code: the catalog was already read from the host the credential is valid on.
+- **`api.blockrun.ai/v1/models` now answers an anonymous read `200`** where it answered `401`. The key is still sent for an account deployment — the account's listing is the one `/spend` prices from — and a chat request without a key is still `401`, free model or not.
+- **`@blockrun/llm` is 3.26.5 and the harness packages are rc.8** in the lockfile. 3.26.3 matters here: the gateway's 402 now lists an `upto` option beside `exact`, and earlier SDKs signed an exact transfer against whichever option came first. The declared ranges are unchanged, so an existing install is not forced to move.
+
 ## 0.12.0 — 2026-09-05
 
 ### Added

@@ -121,8 +121,9 @@ export interface Config {
    * Checked after {@link Config.apiKeyEnv} and BEFORE
    * {@link Config.walletKeyEnv}. A deployment holding both wallets has said
    * which chains it can pay on rather than which it prefers, and this route
-   * picks Solana — the chain BlockRun's own SDK recommends, serving a catalog
-   * verified identical to Base's, id for id.
+   * picks Solana — the chain BlockRun's own SDK recommends. Its catalog is
+   * close to Base's but not identical (three ids differ each way as of
+   * 2026-11-21), and this route lists whichever host the credential is on.
    *
    * Paying on Solana needs `@solana/web3.js` and `@solana/spl-token`
    * installed. They are optional peers of `@blockrun/llm` and of this package,

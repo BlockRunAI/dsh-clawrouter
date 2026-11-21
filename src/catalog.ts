@@ -40,10 +40,19 @@ export const DEFAULT_MAX_TOKENS = 8_192
  * This gateway quotes on the max_tokens you REQUEST, not the tokens the model
  * returns, and settles the quoted amount. Declaring a model's full `max_output`
  * as the default therefore bills every unspecified call for output nobody
- * asked for. Measured on `anthropic/claude-opus-5`: a request capped at its
- * advertised 128,000 quotes $0.3211, against $0.0216 with no cap at all and
- * $0.0036 capped at 1,000 — an 89-fold difference decided by a field the
- * caller never set.
+ * asked for. Measured on `anthropic/claude-opus-5`, 2026-11-21: a request
+ * capped at its advertised 128,000 quotes $3.3611, against $0.2161 at this
+ * ceiling and $0.0273 capped at 1,000 — a 123-fold spread decided by a field
+ * the caller never set. (The same three read $0.3211, $0.0216 and $0.0036
+ * until the gateway began quoting list price on the whole cap rather than
+ * about a tenth of it; a request carrying no cap at all is now quoted as
+ * 8,192.)
+ *
+ * That makes this ceiling a real cost on the wallet path and not only a
+ * guard: every unspecified call to a strong model starts above twenty cents.
+ * It is left where it is because lowering it truncates replies for everyone,
+ * including account-key deployments that are billed on the tokens produced
+ * and never see the cap at all.
  *
  * A model that genuinely needs to emit more than this takes an explicit
  * `maxTokens` from the caller, which is quoted and paid for deliberately.
@@ -143,6 +152,21 @@ const VISION_CATEGORY = 'vision'
  * repricing fixed it. The image fix for the other three `pro` entries is a
  * different change and is still open, which is why they still refuse.
  *
+ * **The roster has moved since that run and this list has deliberately not
+ * followed it.** Checked 2026-11-21, the catalog tags 63 chat models `vision`.
+ * `moonshot/kimi-k3` was delisted and is dropped below, leaving 33;
+ * `nvidia/llama-3.2-11b-vision` and the substitute `nvidia/nemotron-3-nano-30b`
+ * are gone too, so the second and third kinds above now describe history.
+ * Thirty tagged entries have never been measured at all — the GPT-6 family and
+ * `gpt-5.1`, Claude Opus 5.5 / Sonnet 5.5 / Fable 5.1 and 5.2, Gemini 4 and
+ * `gemini-3.8-flash`, `grok-4.6` and `4.7`, `kimi-k3.1-pro`,
+ * `mistral-large-4`, DeepSeek's `deepseek-chat`, `deepseek-reasoner` and
+ * `deepseek-v4.1-flash`, and the free `nemotron-3-super-120b`,
+ * `nemotron-3.5-bolt` and `nemotron-3-nano-omni`. They stay out until
+ * `npm run probe:vision` measures them: unmeasured is not the same as failed,
+ * but it is not a pass either. The three free ones were probed that day with
+ * no credential and answered `RATE_LIMIT` on most colours.
+ *
  * Declaring image input from the tag would therefore admit an attachment that
  * fails mid-turn, after the message is durable, having already been paid for.
  * The default is the measured set; `visionModels` widens it as the gateway
@@ -165,7 +189,6 @@ export const VERIFIED_VISION_MODELS: readonly string[] = [
   'google/gemini-3.1-pro',
   'google/gemini-3.5-flash',
   'google/gemini-3.6-flash',
-  'moonshot/kimi-k3',
   'openai/chat-latest',
   'openai/gpt-4.1',
   'openai/gpt-4o',
@@ -240,8 +263,11 @@ export class BlockrunCatalog {
    * @param maxOutputCeiling - ceiling on a model's default output cap.
    * @param resolveEndpoint - reads the base and headers the CURRENT credential
    *   can list against. An API-key deployment must read the account's own
-   *   catalog: `api.blockrun.ai/v1/models` answers `401` unauthenticated, and
-   *   it is the listing whose prices `/spend` bills from. Omitted keeps the
+   *   catalog: it is the listing whose prices `/spend` bills from, and it is
+   *   not the wallet gateway's — checked 2026-11-21 it carries one id the
+   *   others do not and publishes no platform fee. (That host answered an
+   *   anonymous listing `401` until late 2026 and now answers `200`; the key
+   *   is sent regardless, since the read is on the account's behalf.) Omitted keeps the
    *   anonymous read of `baseURL`, which is what a wallet deployment wants.
    */
   constructor(
@@ -318,7 +344,7 @@ export class BlockrunCatalog {
       // dressed up as a fresh one.
       if (signal?.aborted === true) throw error
       // Serve the previous catalog through a transient gateway failure: a
-      // selector that listed 70 models a minute ago must not empty because one
+      // selector that listed a hundred models a minute ago must not empty because one
       // refresh timed out. With nothing cached there is no honest answer, so
       // the failure surfaces. A listing from a DIFFERENT host is not a stale
       // answer to this question, it is an answer to another one — so it is not
@@ -358,7 +384,7 @@ export class BlockrunCatalog {
     const models = await this.list(signal)
     const found = models.find(entry => entry.id === model)
     if (found === undefined) {
-      // With seventy slash-prefixed ids, a wrong name is almost always a near
+      // With close to a hundred slash-prefixed ids, a wrong name is almost always a near
       // miss — a dropped `vendor/` prefix, a missing hyphen, a stale suffix —
       // so the useful answer is the name they meant, not the fact they were
       // wrong.

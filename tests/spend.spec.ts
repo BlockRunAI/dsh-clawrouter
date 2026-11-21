@@ -353,3 +353,43 @@ describe('account billing is priced from tokens, not from a per-request quote', 
     expect(meter.summary().totalUsd).toBe(0.002)
   })
 })
+
+
+describe('a signed amount is exact, and is said to be', () => {
+  it('prices the call at what was signed and stays quiet about floors', () => {
+    const meter = new SpendMeter(0.002)
+    meter.record('anthropic/claude-opus-5', usage(112_000, 200), false, undefined, {
+      kind: 'per-request',
+      feeUsd: 0.002,
+      signedUsd: 0.5892,
+    })
+    const summary = meter.summary()
+    expect(summary.totalUsd).toBeCloseTo(0.5892, 10)
+    expect(summary.estimatedCalls).toBe(0)
+    const text = renderSpend(summary)
+    // The warning exists for a figure that is a guess. Printing it over the
+    // amount actually authorized would tell the reader to distrust the one
+    // number on screen that is right.
+    expect(text).not.toMatch(/FLOOR AND LIKELY WELL UNDER/)
+    expect(text).toMatch(/amount this process actually signed/)
+  })
+
+  it('says how many calls are estimates when only some carried a signed amount', () => {
+    const meter = new SpendMeter(0.002)
+    meter.record('m', usage(20, 5), false, undefined, { kind: 'per-request', signedUsd: 0.0145 })
+    meter.record('m', usage(20, 5))
+    const summary = meter.summary()
+    expect(summary.totalUsd).toBeCloseTo(0.0145 + 0.002, 10)
+    expect(summary.estimatedCalls).toBe(1)
+    expect(renderSpend(summary)).toMatch(/1 wallet call is priced at the configured per-request figure/)
+  })
+
+  it('ignores a signed amount that is not a positive number', () => {
+    const meter = new SpendMeter(0.002)
+    for (const signedUsd of [0, -1, Number.NaN]) {
+      meter.record('m', usage(20, 5), false, undefined, { kind: 'per-request', signedUsd })
+    }
+    expect(meter.summary().totalUsd).toBeCloseTo(0.006, 10)
+    expect(meter.summary().estimatedCalls).toBe(3)
+  })
+})

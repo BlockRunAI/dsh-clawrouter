@@ -446,7 +446,7 @@ describe('/gate reports whether the net is actually up', () => {
     const command = ctx.commands.list(owner).find(entry => entry.name === 'gate')
     expect(command, '/gate is not registered').toBeDefined()
     const line = input.length === 0 ? '/gate' : `/gate ${input}`
-    const execution = await ctx.commands.execute(owner, line, AbortSignal.timeout(20_000))
+    const execution = await ctx.commands.execute(owner, line, [], AbortSignal.timeout(20_000))
     expect(execution, `command surface did not run ${line}`).toBeDefined()
     const result = execution!.result as { text?: string }
     return result.text ?? ''

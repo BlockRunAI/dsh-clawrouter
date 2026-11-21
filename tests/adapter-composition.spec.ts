@@ -340,7 +340,7 @@ describe('/spend in the composed context', () => {
     const owner = agent(ctx)
     expect(ctx.commands.list(owner).map(c => c.name)).toContain('spend')
 
-    const result = await ctx.commands.execute(owner, '/spend', new AbortController().signal)
+    const result = await ctx.commands.execute(owner, '/spend', [], new AbortController().signal)
     expect(result?.result.kind).toBe('success')
     // An empty meter says so rather than printing a confident $0 that could be
     // mistaken for "this route is free".

@@ -30,7 +30,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { BlockrunAdapter } from '../src/adapter.ts'
 import { BlockrunCatalog, VERIFIED_VISION_MODELS } from '../src/catalog.ts'
-import { catalogEndpoint, DEFAULT_API_KEY_URL, DEFAULT_SOLANA_API_URL } from '../src/auth.ts'
+import { catalogEndpoint, DEFAULT_API_KEY_URL, DEFAULT_SOLANA_API_URL, freeTierKey } from '../src/auth.ts'
 import { DEFAULT_API_URL } from '../src/index.ts'
 import { SpendMeter } from '../src/spend.ts'
 
@@ -42,7 +42,7 @@ import { SpendMeter } from '../src/spend.ts'
  * billed at exact usage, so measuring forty models costs a fraction of what
  * forty flat x402 quotes do. The hosts are not interchangeable: a `brk_live_…`
  * key on a wallet gateway is answered 402, the account host answers an
- * unauthenticated catalog read 401, and neither chain can verify the other's
+ * unauthenticated chat request 401, and neither chain can verify the other's
  * signature — so the host travels with the credential.
  * @returns {import('../src/auth.ts').BlockrunAuth | undefined} the resolved
  *   auth, or undefined when no credential is available at all.
@@ -227,6 +227,31 @@ export function selectCandidates(entries, options = {}) {
 }
 
 /**
+ * The list to paste back after a run.
+ *
+ * Three rules, each of which the first version got wrong by omission:
+ *
+ * - An id this run measured is in the list only if it passed THIS run. A
+ *   `--models=` re-check of a listed model that now fails must take it out;
+ *   merging "verified plus passed" kept it.
+ * - An id this run did not measure keeps its earlier verdict.
+ * - An id the catalog no longer lists as chat+vision is dropped. The roster
+ *   turns over between runs — `moonshot/kimi-k3` and `nvidia/llama-3.2-11b-vision`
+ *   were both gone by 2026-11-21 — and a list that only ever grows ends up
+ *   documenting models nobody can call.
+ * @param {CatalogEntry[]} entries - chat+vision entries in the live catalog.
+ * @param {{ verified?: Set<string>, passed?: string[], measured?: string[] }} [options]
+ * @returns {string[]} the sorted ids.
+ */
+export function mergeVerified(entries, options = {}) {
+  const { verified = new Set(), passed = [], measured = [] } = options
+  const listed = new Set(entries.map(model => model.id))
+  const remeasured = new Set(measured)
+  const kept = [...verified].filter(id => !remeasured.has(id))
+  return [...new Set([...kept, ...passed])].filter(id => listed.has(id)).sort()
+}
+
+/**
  * What one call to `model` is quoted at, at {@link MAX_TOKENS}.
  *
  * Priced from the catalog rather than from the $0.002 floor, because the floor
@@ -319,9 +344,19 @@ async function main() {
     return new BlockrunAdapter({
       provider: 'blockrun',
       connection: () => ({ apiUrl: API_URL, timeoutMs: 120_000 }),
-      resolveAuth: () => AUTH === undefined
-        ? Promise.reject(new Error('no BlockRun credential configured'))
-        : Promise.resolve(AUTH),
+      // Mirrors the plugin's own order: an account key always travels, because
+      // its host answers 401 without one; otherwise a free model goes out on a
+      // throwaway key that signs nothing, even when a real wallet is present.
+      // Until 2026-11-21 this rejected whenever no credential was configured,
+      // free model or not — so the "free models need no wallet" run this script
+      // advertises failed 3/3 on every model, reading as three vision failures.
+      resolveAuth: ({ free }) => {
+        if (AUTH?.mode === 'api-key') return Promise.resolve(AUTH)
+        if (free) return Promise.resolve({ mode: 'wallet', privateKey: freeTierKey(), apiUrl: DEFAULT_API_URL })
+        return AUTH === undefined
+          ? Promise.reject(new Error('no BlockRun credential configured'))
+          : Promise.resolve(AUTH)
+      },
       // Widened deliberately: the point is to measure a model the default list
       // does not yet admit, and the default would refuse the image locally.
       catalog: new BlockrunCatalog(
@@ -404,7 +439,9 @@ async function main() {
 
   // Printed as source rather than as a list, because the last three refreshes
   // each ended with someone retyping thirty ids by hand.
-  const merged = [...new Set(all ? passed : [...verified, ...passed])].sort()
+  const merged = mergeVerified(entries, { verified, passed, measured: candidates.map(model => model.id) })
+  const delisted = [...verified].filter(id => !entries.some(model => model.id === id))
+  for (const id of delisted) console.log(`\ndropped: ${id} is no longer a chat+vision entry in the catalog`)
   console.log(`\n${passed.length} of ${candidates.length} passed. VERIFIED_VISION_MODELS becomes ${merged.length}:\n`)
   for (const id of merged) console.log(`  '${id}',`)
 

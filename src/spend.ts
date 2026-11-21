@@ -105,6 +105,12 @@ interface Tally extends ModelSpend {
   flatCalls: number
   /** Their summed quotes, which are not `flatCalls x` one number: see {@link CallPricing}. */
   flatCostUsd: number
+  /**
+   * Wallet calls priced at the configured per-request figure because the
+   * amount actually signed was not available. These are the ones the total can
+   * be wrong about; a call carrying its signed amount is exact.
+   */
+  estimatedCalls: number
   /** Account-billed cost accumulated from tokens x published rates. */
   tokenCostUsd: number
   /** Substitutions by served model id, accumulated in place. */
@@ -126,8 +132,16 @@ export type CallPricing =
    * and Solana are quoted differently for the same request, so a meter holding
    * one figure is wrong on one of them. Absent falls back to the meter's own
    * default, which is what an older caller passing no fee gets.
+   *
+   * `signedUsd` is what the payment for THIS call was actually signed for, and
+   * it wins over `feeUsd` whenever it is present. The two are not the same
+   * number any more: measured 2026-11-21, the gateway quotes list price on the
+   * full `max_tokens` requested, so one `anthropic/claude-opus-5` call at this
+   * route's default 8,192-token cap is quoted $0.2161 where `feeUsd` says
+   * $0.002 — a total built from the configured figure is low by two orders of
+   * magnitude on exactly the calls that cost the most.
    */
-  | { readonly kind: 'per-request'; readonly feeUsd?: number }
+  | { readonly kind: 'per-request'; readonly feeUsd?: number; readonly signedUsd?: number }
   /**
    * Account billing at exact usage.
    * @remarks `rates` absent means the catalog published none for this model,
@@ -156,6 +170,12 @@ export interface SpendSummary {
   calls: number
   /** The scheme behind `totalUsd`; `none` when nothing has been charged yet. */
   basis: SpendBasis
+  /**
+   * Wallet calls whose cost is the configured per-request figure rather than
+   * the amount signed. Zero means every wallet figure in this summary is what
+   * was actually authorized.
+   */
+  estimatedCalls: number
   /** Carried for context only; deliberately not priced. */
   inputTokens: number
   /** Carried for context only; deliberately not priced. */
@@ -208,6 +228,7 @@ export class SpendMeter {
       outputTokens: 0,
       costUsd: 0,
       flatCostUsd: 0,
+      estimatedCalls: 0,
       tokenCostUsd: 0,
       substitutions: new Map(),
     }
@@ -228,7 +249,16 @@ export class SpendMeter {
       entry.paidCalls += 1
       if (pricing.kind === 'per-request') {
         entry.flatCalls += 1
-        entry.flatCostUsd += pricing.feeUsd ?? this.requestPriceUsd
+        if (pricing.signedUsd !== undefined && Number.isFinite(pricing.signedUsd) && pricing.signedUsd > 0) {
+          entry.flatCostUsd += pricing.signedUsd
+        } else {
+          // No signed amount to read — an older caller, or a client that could
+          // not report one. The configured figure is the floor of what a quote
+          // can be, so this under-reports rather than invents, and the summary
+          // says how many calls it applies to.
+          entry.estimatedCalls += 1
+          entry.flatCostUsd += pricing.feeUsd ?? this.requestPriceUsd
+        }
       } else if (pricing.rates === undefined) {
         // Counted, never guessed. Zero would read as free and any invented
         // rate would read as fact.
@@ -271,6 +301,7 @@ export class SpendMeter {
     return {
       calls: byModel.reduce((sum, entry) => sum + entry.calls, 0),
       basis: flat && metered ? 'mixed' : flat ? 'per-request' : metered ? 'per-token' : 'none',
+      estimatedCalls: tallies.reduce((sum, entry) => sum + entry.estimatedCalls, 0),
       inputTokens: byModel.reduce((sum, entry) => sum + entry.inputTokens, 0),
       outputTokens: byModel.reduce((sum, entry) => sum + entry.outputTokens, 0),
       // Summed from the rows rather than from the call count, so the total and
@@ -324,18 +355,19 @@ export function renderSpend(summary: SpendSummary): string {
   const paid = summary.byModel.filter(entry => entry.free !== true)
   const paidCalls = paid.reduce((sum, entry) => sum + entry.calls, 0)
   const averageInput = paidCalls === 0 ? 0 : paid.reduce((sum, entry) => sum + entry.inputTokens, 0) / paidCalls
-  lines.push('', ...basisNotes(summary.basis, paidCalls))
-  // The floor warning belongs to the quote, and an account-billed call has no
-  // quote — it is invoiced from the very counts printed above. Printing it
-  // there would warn a reader off a number that is exact.
-  if (summary.basis !== 'per-token' && averageInput > FLOOR_RELIABLE_INPUT_TOKENS) {
+  lines.push('', ...basisNotes(summary.basis, paidCalls, summary.estimatedCalls))
+  // The floor warning belongs to an ESTIMATED quote. An account-billed call
+  // has no quote at all — it is invoiced from the very counts printed above —
+  // and a wallet call that carried its signed amount is already exact, so
+  // printing this over either would warn a reader off a number that is right.
+  if (summary.basis !== 'per-token' && summary.estimatedCalls > 0 && averageInput > FLOOR_RELIABLE_INPUT_TOKENS) {
     // Silence here would be the misleading part. The quote climbs with input,
     // so on a long context this total is not slightly low, it is a different
     // order of magnitude.
     lines.push(
       `THIS TOTAL IS A FLOOR AND LIKELY WELL UNDER THE REAL CHARGE: averaging ${Math.round(averageInput).toLocaleString()} input tokens per call, `
-      + 'and the request price climbs with both context and the model. Measured at ~112K input tokens, one call quotes about '
-      + '$0.02 on gpt-4.1-nano, $0.03 on deepseek-chat, $0.33 on gemini-3.5-flash and $1.08 on claude-opus-5 — so read your own '
+      + 'and the request price climbs with context, with the max_tokens asked for, and with the model. Measured 2026-11-21 at ~112K input tokens, '
+      + 'one call quotes about $0.01 on gpt-6-luna, $0.02 on deepseek-chat, $0.18 on gemini-3.5-flash and $0.59 on claude-opus-5 — so read your own '
       + "model's rate rather than any single number here.",
     )
   }
@@ -357,9 +389,11 @@ export function renderSpend(summary: SpendSummary): string {
  * the kind of wrong that ends in a surprised customer.
  * @param basis - which scheme(s) the counted calls settled under.
  * @param paidCalls - calls that cost anything at all.
+ * @param estimatedCalls - wallet calls priced at the configured figure rather
+ *   than at the amount signed.
  * @returns one line per applicable scheme.
  */
-function basisNotes(basis: SpendBasis, paidCalls: number): string[] {
+function basisNotes(basis: SpendBasis, paidCalls: number, estimatedCalls = 0): string[] {
   if (paidCalls === 0) {
     return [
       'Every call so far went to a free model: nothing was quoted, nothing settled, and nothing is owed.',
@@ -377,6 +411,16 @@ function basisNotes(basis: SpendBasis, paidCalls: number): string[] {
       'Wallet (x402): quoted from the request — input size plus the max_tokens asked for — and settled at that'
       + ' amount whichever way the model answers. These counts are what was produced, so they cannot'
       + ' reconstruct the charge.',
+    )
+    // Said in one direction or the other, never left to be inferred: the two
+    // kinds of wallet figure look identical on screen and differ by up to two
+    // orders of magnitude.
+    notes.push(
+      estimatedCalls === 0
+        ? 'Each wallet figure above is the amount this process actually signed for that request.'
+        : `${estimatedCalls} wallet call${estimatedCalls === 1 ? ' is' : 's are'} priced at the configured per-request figure,`
+          + ' not at the amount signed — the signed amount was not available for '
+          + (estimatedCalls === 1 ? 'it' : 'them') + ', so treat that part as a floor.',
     )
   }
   return notes
