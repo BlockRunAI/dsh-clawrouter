@@ -69,12 +69,13 @@ describe('projectCatalog', () => {
   })
 
   it('keeps a vision-TAGGED model text-only when it is not on the verified list', () => {
-    // The tag over-claims. Sent the same inline PNG, this model dropped the
-    // image and answered "I didn't receive any image", and the turn was
-    // paid for. Trusting the tag would admit an attachment that fails
-    // mid-turn, after the message is durable and the call is paid for.
+    // The tag over-claims. On 2026-11-21 this model, tagged `vision`, named a
+    // green image black. Trusting the tag would admit an attachment the model
+    // answers wrongly about, after the message is durable and the call is
+    // paid for. (The example used to be gpt-5.2-pro, which refused images
+    // until the gateway fixed its Responses path; it passes now.)
     const [model] = projectCatalog('blockrun', {
-      data: [{ id: 'openai/gpt-5.2-pro', categories: ['chat', 'vision'] }],
+      data: [{ id: 'mistral/mistral-large-4', categories: ['chat', 'vision'] }],
     })
     expect(model?.inputModalities).toEqual(['text'])
   })

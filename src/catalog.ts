@@ -98,74 +98,36 @@ const VISION_CATEGORY = 'vision'
  *
  * The `vision` tag is not sufficient. Every tagged chat model is sent a solid
  * PNG and asked its colour; only the ones that answer correctly are listed.
- * Measured with `npm run probe:vision` on 2026-08-31: 34 of 40 answered, in
- * three different colours each — one colour is guessable, and the earlier
- * hand runs used one.
+ * Measured with `npm run probe:vision` on 2026-11-21: of the 63 tagged chat
+ * models, 59 are listed — the 32 still standing from the 2026-08-31 run and 27
+ * of the 30 measured for the first time that day, each in three different
+ * colours, since one colour is guessable.
  *
- * The six left out fall into three kinds, and only the first is the model's
- * own fault:
+ * The four left out:
  *
- * - **Refuses the image.** `openai/gpt-5.2-pro`, `gpt-5.4-pro` and
- *   `gpt-5.5-pro` now fail `INVALID_REQUEST` on all three colours; until
- *   2026-08-30 they dropped the image and answered as if none was sent, which
- *   was billed, so failing loudly is an upstream improvement.
- * - **Never sent the image, by the gateway rather than the model.**
- *   `nvidia/llama-3.2-11b-vision` answers "you didn't provide an image"
- *   because that is true: the gateway strips every `image_url` part on both
- *   NVIDIA paths before dispatch (`ai-providers.ts:910`, `ai-stream.ts:1933`),
- *   unconditionally, under a comment asserting NVIDIA models have no vision.
- *   They do — probed directly against NIM, both this model and
- *   `nemotron-3-nano-omni` name the colour correctly. The entry still cannot
- *   be listed here, because this list is what works THROUGH this gateway, but
- *   the fault is ours to fix and not the vendor's.
- * - **Never actually measured, because a different model answered.**
- *   `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` and `qwen/qwen3.8-flash`
- *   were served by `nvidia/nemotron-3-nano-30b` and `qwen/qwen3.7-flash`
- *   respectively — neither of which is the model that was asked for, so
- *   neither run says anything about the model under test. nano-omni does pass
- *   when the gateway happens to reach it, which is the trap: an entry that
- *   works when the cascade feels like it produces a confident wrong answer
- *   about an image the model never received (BlockRunAI/blockrun#450).
+ * - **Answered wrong.** `mistral/mistral-large-4` named green as black, 2 of 3.
+ *   Unlike a substitution, this is the model itself; a later sweep may clear it.
+ * - **Never measured, because a different model answered.** The free-tier
+ *   cascade (BlockRunAI/blockrun#450) still substitutes silently, now among the
+ *   free NVIDIA entries. Requests for `nvidia/nemotron-3-super-120b` and
+ *   `nvidia/nemotron-3.5-bolt` were answered by `nemotron-3-nano-omni` on 2 of
+ *   3 each, so neither run says anything about the model asked for.
+ * - **Passes when reached, and is not always reached.**
+ *   `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` passed 3/3 in the sweep and
+ *   names every colour correctly whenever it actually answers. It stays out
+ *   anyway: three more runs the same day had it answered by
+ *   `nemotron-3-super-120b` once and rate-limited on the rest. A run that
+ *   happens to pass is not evidence an entry belongs here; the trap is an image
+ *   path that works when the cascade feels like it. Before 2026-11 the
+ *   substitute was the text-only `nemotron-3-nano-30b`, so a substituted call
+ *   produced a confident wrong answer about an image the model never received;
+ *   that model is gone, but the substitution is not.
  *
- *   The nano-omni case is worth keeping in full, because three people measured
- *   it independently and all three drew the wrong conclusion — TWO separate
- *   gateway defects produce one symptom, and either alone explains the data
- *   badly. nano-omni is routed through OpenRouter, so its images were always
- *   forwarded and it answers correctly every time it is actually reached. The
- *   runs where it reports no image are the ones where the free-tier cascade
- *   substituted `nemotron-3-nano-30b` — which is routed direct to NVIDIA, is
- *   not `vision`-tagged, and therefore had its image *correctly* removed by
- *   the gateway's NVIDIA path. So the wrong answer comes from a model doing
- *   the right thing with a request it should never have received.
- *
- *   Read either defect alone and you get a plausible, wrong story: "the model
- *   is flaky at vision" (it is not) or "the gateway strips its images" (it
- *   does not, for this one). That is why the fix for the NVIDIA image drop
- *   (BlockRunAI/blockrun#456) does not put this entry in the list, and why a
- *   probe run that happens to pass is not evidence it belongs there.
- *
- * `openai/gpt-5.6-luna-pro` was excluded and now passes, but not because the
- * image path improved: it was UNROUTABLE. The catalog still priced it at
- * $0.10/$0.60 after OpenAI moved it to $0.20/$1.20, and the gateway derives
- * its upstream cost ceiling from the catalog price — so every call matched no
- * endpoint, and with no fallback declared, callers got a hard failure. The
- * repricing fixed it. The image fix for the other three `pro` entries is a
- * different change and is still open, which is why they still refuse.
- *
- * **The roster has moved since that run and this list has deliberately not
- * followed it.** Checked 2026-11-21, the catalog tags 63 chat models `vision`.
- * `moonshot/kimi-k3` was delisted and is dropped below, leaving 33;
- * `nvidia/llama-3.2-11b-vision` and the substitute `nvidia/nemotron-3-nano-30b`
- * are gone too, so the second and third kinds above now describe history.
- * Thirty tagged entries have never been measured at all — the GPT-6 family and
- * `gpt-5.1`, Claude Opus 5.5 / Sonnet 5.5 / Fable 5.1 and 5.2, Gemini 4 and
- * `gemini-3.8-flash`, `grok-4.6` and `4.7`, `kimi-k3.1-pro`,
- * `mistral-large-4`, DeepSeek's `deepseek-chat`, `deepseek-reasoner` and
- * `deepseek-v4.1-flash`, and the free `nemotron-3-super-120b`,
- * `nemotron-3.5-bolt` and `nemotron-3-nano-omni`. They stay out until
- * `npm run probe:vision` measures them: unmeasured is not the same as failed,
- * but it is not a pass either. The three free ones were probed that day with
- * no credential and answered `RATE_LIMIT` on most colours.
+ * Two earlier exclusions are history now. `openai/gpt-5.2-pro`, `gpt-5.4-pro`
+ * and `gpt-5.5-pro` refused images `INVALID_REQUEST` on 2026-08-31 and passed
+ * 3/3 on 2026-11-21 (the gateway's Responses image fix, BlockRunAI/blockrun#444).
+ * `nvidia/llama-3.2-11b-vision`, whose images the gateway's NVIDIA path
+ * stripped (BlockRunAI/blockrun#456), was delisted, as was `moonshot/kimi-k3`.
  *
  * Declaring image input from the tag would therefore admit an attachment that
  * fails mid-turn, after the message is durable, having already been paid for.
@@ -174,36 +136,62 @@ const VISION_CATEGORY = 'vision'
  */
 export const VERIFIED_VISION_MODELS: readonly string[] = [
   'anthropic/claude-fable-5',
+  'anthropic/claude-fable-5.1',
+  'anthropic/claude-fable-5.2',
   'anthropic/claude-haiku-4.5',
   'anthropic/claude-opus-4.5',
   'anthropic/claude-opus-4.7',
   'anthropic/claude-opus-4.8',
   'anthropic/claude-opus-5',
+  'anthropic/claude-opus-5.5',
   'anthropic/claude-sonnet-4.5',
   'anthropic/claude-sonnet-4.6',
   'anthropic/claude-sonnet-5',
+  'anthropic/claude-sonnet-5.5',
+  'deepseek/deepseek-chat',
+  'deepseek/deepseek-reasoner',
   'deepseek/deepseek-v4-flash-vision-exp',
+  'deepseek/deepseek-v4.1-flash',
   'google/gemini-2.5-flash',
   'google/gemini-2.5-pro',
   'google/gemini-3-flash-preview',
   'google/gemini-3.1-pro',
   'google/gemini-3.5-flash',
   'google/gemini-3.6-flash',
+  'google/gemini-3.8-flash',
+  'google/gemini-4-argon',
+  'google/gemini-4-carbon',
+  'google/gemini-4-hydrogen',
+  'google/gemini-4-neon',
+  'moonshot/kimi-k3.1-pro',
   'openai/chat-latest',
   'openai/gpt-4.1',
   'openai/gpt-4o',
+  'openai/gpt-5.1',
   'openai/gpt-5.2',
+  'openai/gpt-5.2-pro',
   'openai/gpt-5.4',
   'openai/gpt-5.4-mini',
+  'openai/gpt-5.4-pro',
   'openai/gpt-5.5',
+  'openai/gpt-5.5-pro',
   'openai/gpt-5.6-luna',
   'openai/gpt-5.6-luna-pro',
   'openai/gpt-5.6-sol',
   'openai/gpt-5.6-sol-pro',
   'openai/gpt-5.6-terra',
   'openai/gpt-5.6-terra-pro',
+  'openai/gpt-6-astra',
+  'openai/gpt-6-luna',
+  'openai/gpt-6-sol',
+  'openai/gpt-6.1-sol',
+  'openai/gpt-6.2-astra',
+  'openai/gpt-6.2-sol',
+  'qwen/qwen3.8-flash',
   'xai/grok-4.3',
   'xai/grok-4.5',
+  'xai/grok-4.6',
+  'xai/grok-4.7',
   'xiaomi/mimo-v2.5',
   'zai/glm-5.3-flash',
 ]

@@ -4,6 +4,12 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
+## Unreleased
+
+### Changed
+- **59 models now take images, up from 33.** `npm run probe:vision` measured the 30 vision-tagged models that had never been checked, three colours each, and 27 passed: the GPT-6 family and `gpt-5.1`, Claude Opus 5.5 / Sonnet 5.5 / Fable 5.1 and 5.2, Gemini 4 and `gemini-3.8-flash`, `grok-4.6` and `4.7`, `kimi-k3.1-pro`, DeepSeek's `deepseek-chat`, `deepseek-reasoner` and `deepseek-v4.1-flash`, `qwen3.8-flash`, and the three OpenAI `pro` entries that refused images in August and pass since the gateway fixed its Responses image path. The default reviewer, Opus 5.5, is among them.
+- **Four tagged models stay out.** `mistral/mistral-large-4` named a green image black. `nvidia/nemotron-3-super-120b` and `nvidia/nemotron-3.5-bolt` were never measured: the free-tier cascade answered for each with `nemotron-3-nano-omni` on 2 of 3. And `nemotron-3-nano-omni` itself, though it passed the sweep and is right whenever it is reached, was answered by another model in a re-check the same day — an image path that works only when the cascade allows is the one this list exists to keep out. Add any of them to `visionModels` if you have measured otherwise.
+
 ## 0.14.0 — 2026-11-21
 
 ### Changed
