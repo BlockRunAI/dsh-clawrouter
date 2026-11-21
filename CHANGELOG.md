@@ -4,7 +4,7 @@ All notable changes to `dsh-clawrouter`. Versions follow [semver](https://semver
 
 Entries say what changed for *you*, and what it meant when it was wrong — most of the fixes below were silent, so "upgrade if you are on an earlier version" is the honest summary of every one of them.
 
-## Unreleased
+## 0.13.0 — 2026-11-21
 
 ### Added
 - **A key saved by `clawrouter login` now works here with nothing exported.** ClawRouter stores an account key from [user.blockrun.ai](https://user.blockrun.ai) in `~/.blockrun/.api-key`, labelled as shared across BlockRun's tools — and this plugin ignored it, so a machine already logged in was told it had no credential. It is now read whenever `BLOCKRUN_API_KEY` resolves to nothing (then ClawRouter's older `~/.openclaw/blockrun/api-key`), and it still outranks both wallets. The environment variable wins when set. Two cases fail loudly rather than fall through to a wallet, as they do in ClawRouter: a key file that exists but cannot be read, and one that does not hold a `brk_…` key. `apiKeyFiles` names the files; `[]` reads none. Wallet key files are still never read.
