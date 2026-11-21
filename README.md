@@ -287,6 +287,8 @@ This is the shortest path, and the one to take unless you specifically want to a
 3. Issue a key at **[user.blockrun.ai/dashboard/keys](https://user.blockrun.ai/dashboard/keys)**. The plaintext is shown once; copy it then.
 4. `export BLOCKRUN_API_KEY=brk_live_...`
 
+Or skip the environment variable and log in from inside the harness — `/blockrun login brk_live_...` checks the key against the account host, refuses one the host rejects, and saves it to `~/.blockrun/.api-key` readable by you only. `/blockrun logout` removes it, and bare `/blockrun` says which credential the route is on. The key is kept out of the session log, but it was still typed into a UI; from a terminal, `clawrouter login` writes the same file.
+
 **Already logged in with ClawRouter? Then you are done.** `clawrouter login brk_live_...` saves the key to `~/.blockrun/.api-key`, the location shared by BlockRun's tools, and this plugin reads it from there when `BLOCKRUN_API_KEY` is not set — so the same login covers both, and `clawrouter logout` switches both back. The environment variable still wins when it is set.
 
 `/spend` then names the key it is using, masked, and where it came from, and prints the account's remaining credit as the account host reports it:
@@ -294,7 +296,11 @@ This is the shortest path, and the one to take unless you specifically want to a
 ```
 BlockRun account key brk_live_Ab3xQ9…f8c1 (from ~/.blockrun/.api-key).
 Account credit: $41.20 remaining (spent $8.80). Top up at https://user.blockrun.ai/dashboard/credits.
+Account ledger since this process started: $0.0123 across 3 calls — this process recorded $0.0041 across 1.
+  2 of those were not made here: expected if this key is also used on another machine or by another BlockRun tool, and worth a look at the dashboard if it is not.
 ```
+
+The last two lines are the account's own ledger (`GET /v1/usage/summary`) beside what this process counted over the same window. The ledger is the authority; the comparison is there so a key being used somewhere you did not expect shows up in the place you already look. It is not ClawRouter's `reconcile` — this route keeps no per-call journal to join on request ids — so for a call-by-call diff use that, or the dashboard.
 
 What you get for it: **exact token billing with no per-call fee and no minimum**, and every call written to your account ledger — [`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) shows request id, model, tokens and cost per call, so `/spend` and the invoice can be reconciled against each other.
 

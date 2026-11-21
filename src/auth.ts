@@ -45,9 +45,9 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /** Account-billed API root; `brk_live_…` keys are only valid here. */
 export const DEFAULT_API_KEY_URL = 'https://api.blockrun.ai'
@@ -114,7 +114,7 @@ export async function readSavedApiKey(
 ): Promise<SavedApiKey | undefined> {
   for (const path of paths) {
     if (path.length === 0) continue
-    const resolved = path === '~' || path.startsWith('~/') ? join(homedir(), path.slice(1)) : path
+    const resolved = expandHome(path)
     let content: string
     try {
       content = (await readFile(resolved, 'utf8')).trim()
@@ -136,6 +136,59 @@ export async function readSavedApiKey(
     return { key: content, path }
   }
   return undefined
+}
+
+/** `~` and `~/…` against the home of whoever is running; anything else unchanged. */
+function expandHome(path: string): string {
+  return path === '~' || path.startsWith('~/') ? join(homedir(), path.slice(1)) : path
+}
+
+/**
+ * Save an account key where every BlockRun product on the machine looks.
+ *
+ * Written `0600` in a `0700` directory: it is a bearer credential for the
+ * reader's money. The mode is passed to the write rather than applied after
+ * it, so the file is never briefly world-readable.
+ * @param key - the key to save.
+ * @param path - destination, `~`-prefixed or absolute.
+ * @returns the path as given, for the confirmation line.
+ * @throws Error when `key` is not a BlockRun key; nothing is written.
+ */
+export async function saveApiKey(key: string, path: string = DEFAULT_API_KEY_FILES[0]!): Promise<string> {
+  const trimmed = key.trim()
+  if (!API_KEY_PATTERN.test(trimmed)) {
+    throw new Error(`Not a BlockRun API key: expected it to start with "brk_". Issue one at ${PORTAL_URL}/dashboard/keys.`)
+  }
+  const resolved = expandHome(path)
+  await mkdir(dirname(resolved), { recursive: true, mode: 0o700 })
+  await writeFile(resolved, `${trimmed}\n`, { mode: 0o600 })
+  return path
+}
+
+/**
+ * Remove every saved key.
+ *
+ * Every file, not the first: a key left in the older location would be picked
+ * up on the very next request, and "logout" that leaves the account in use is
+ * worse than no logout at all.
+ * @param paths - the files {@link readSavedApiKey} consults.
+ * @returns the paths actually removed, as given.
+ */
+export async function clearSavedApiKeys(paths: readonly string[] = DEFAULT_API_KEY_FILES): Promise<string[]> {
+  const removed: string[] = []
+  for (const path of paths) {
+    if (path.length === 0) continue
+    const resolved = expandHome(path)
+    try {
+      await readFile(resolved)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw new Error(`Cannot read the BlockRun API key file ${path}, so it was not removed.`, { cause: error })
+    }
+    await rm(resolved, { force: true })
+    removed.push(path)
+  }
+  return removed
 }
 
 /**
@@ -186,26 +239,125 @@ export async function fetchCreditBalance(
   apiKey: string,
   timeoutMs: number = CREDIT_FETCH_TIMEOUT_MS,
 ): Promise<CreditBalance | undefined> {
-  try {
-    const response = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/credits`, {
-      headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(timeoutMs),
-      // A bearer token must not follow a redirect to wherever Location says.
-      redirect: 'error',
-    })
-    if (!response.ok) return undefined
-    const body = await response.json() as Record<string, unknown>
-    const amount = (value: unknown): number | null =>
-      typeof value === 'number' && Number.isFinite(value) ? value : null
-    return {
+  return (await checkApiKey(apiUrl, apiKey, timeoutMs)).balance
+}
+
+/** What the account host said about a key. */
+export interface ApiKeyCheck {
+  /**
+   * `accepted` — the host answered for this key. `rejected` — it answered
+   * `401`/`403`, so the key is mistyped or revoked. `unknown` — nothing
+   * conclusive came back, which says nothing about the key.
+   */
+  readonly verdict: 'accepted' | 'rejected' | 'unknown'
+  readonly balance?: CreditBalance
+}
+
+/**
+ * Ask the account host whether it knows a key, and what the account holds.
+ *
+ * The three verdicts are kept apart because they call for different things: a
+ * rejected key should not be saved, while a host that could not be reached is
+ * no reason to refuse a key that may be perfectly good.
+ * @param apiUrl - the account API root.
+ * @param apiKey - the key, sent as a bearer token to that host only.
+ * @param timeoutMs - deadline for the read.
+ * @returns the verdict, with the balance when the host gave one.
+ */
+export async function checkApiKey(
+  apiUrl: string,
+  apiKey: string,
+  timeoutMs: number = CREDIT_FETCH_TIMEOUT_MS,
+): Promise<ApiKeyCheck> {
+  const body = await accountRead(apiUrl, apiKey, 'credits', timeoutMs)
+  if (body === 'rejected') return { verdict: 'rejected' }
+  if (body === undefined) return { verdict: 'unknown' }
+  const amount = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null
+  return {
+    verdict: 'accepted',
+    balance: {
       ...typeof body['billing_mode'] === 'string' ? { billingMode: body['billing_mode'] } : {},
       spentUsd: amount(body['spent_usd']),
       remainingUsd: amount(body['remaining_usd']),
       blocked: body['blocked'] === true,
       ...typeof body['blocked_reason'] === 'string' ? { blockedReason: body['blocked_reason'] } : {},
-    }
+    },
+  }
+}
+
+/**
+ * One authenticated GET against the account host.
+ * @returns the decoded object, `'rejected'` for 401/403, undefined otherwise.
+ */
+async function accountRead(
+  apiUrl: string,
+  apiKey: string,
+  path: string,
+  timeoutMs: number,
+): Promise<Record<string, unknown> | 'rejected' | undefined> {
+  try {
+    const response = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/${path}`, {
+      headers: { accept: 'application/json', authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(timeoutMs),
+      // A bearer token must not follow a redirect to wherever Location says.
+      redirect: 'error',
+    })
+    if (response.status === 401 || response.status === 403) return 'rejected'
+    if (!response.ok) return undefined
+    const body: unknown = await response.json()
+    return typeof body === 'object' && body !== null ? body as Record<string, unknown> : undefined
   } catch {
     return undefined
+  }
+}
+
+/** What the account ledger holds for a window, from `GET /v1/usage/summary`. */
+export interface LedgerSummary {
+  readonly usd: number
+  readonly calls: number
+  /** Calls the ledger has recorded and not yet priced; they are in `calls`, not in `usd`. */
+  readonly unpricedCalls: number
+  /** Days the host could not read. A hole, never a zero. */
+  readonly unavailableDays: readonly string[]
+  /** Set when the figures stop short of now; ISO timestamp they are exact through. */
+  readonly countedThrough?: string
+}
+
+/**
+ * The account ledger's own total since a moment.
+ *
+ * This is the authority on what was charged; the meter in this process is only
+ * what it saw. Read so `/spend` can put the two side by side — the nearest
+ * thing this route has to ClawRouter's `reconcile`, without a per-call journal
+ * to join on.
+ * @param apiUrl - the account API root.
+ * @param apiKey - the account key.
+ * @param from - start of the window.
+ * @param timeoutMs - deadline for the read.
+ * @returns the summary, or undefined when it cannot be read.
+ */
+export async function fetchLedgerSummary(
+  apiUrl: string,
+  apiKey: string,
+  from: Date,
+  timeoutMs: number = CREDIT_FETCH_TIMEOUT_MS,
+): Promise<LedgerSummary | undefined> {
+  const query = new URLSearchParams({ from: from.toISOString(), to: new Date().toISOString() })
+  const body = await accountRead(apiUrl, apiKey, `usage/summary?${query.toString()}`, timeoutMs)
+  if (body === undefined || body === 'rejected') return undefined
+  const totals = body['totals']
+  if (typeof totals !== 'object' || totals === null) return undefined
+  const { usd, calls, unpriced_calls: unpriced } = totals as Record<string, unknown>
+  if (typeof usd !== 'number' || typeof calls !== 'number') return undefined
+  const days = body['unavailable_days']
+  const through = body['counted_through']
+  return {
+    usd,
+    calls,
+    unpricedCalls: typeof unpriced === 'number' ? unpriced : 0,
+    unavailableDays: Array.isArray(days) ? days.filter((day): day is string => typeof day === 'string') : [],
+    ...typeof through === 'string' ? { countedThrough: through } : {},
   }
 }
 

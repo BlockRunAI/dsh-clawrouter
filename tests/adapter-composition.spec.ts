@@ -2,7 +2,7 @@
 // that a missing wallet fails LOUD, naming the credential — rather than
 // surfacing later as an opaque SDK constructor throw mid-turn.
 import { createServer } from 'node:http'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -48,6 +48,16 @@ beforeEach(async () => {
   seen = []
   gateway = createServer((req, res) => {
     seen.push({ url: req.url ?? '', authorization: req.headers['authorization'] })
+    if (req.url?.includes('/v1/usage/summary') === true) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ object: 'usage_summary', totals: { usd: 0.0123, calls: 3, tokens: 900, unpriced_calls: 1 }, unavailable_days: [], counted_through: null }))
+      return
+    }
+    if (req.url?.endsWith('/v1/credits') === true && req.headers['authorization']?.includes('REVOKED') === true) {
+      res.writeHead(401, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: { message: 'Invalid API key', code: 'invalid_api_key' } }))
+      return
+    }
     if (req.url?.endsWith('/v1/credits') === true) {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ billing_mode: 'prepaid', granted_usd: 50, spent_usd: 8.8, remaining_usd: 41.2, blocked: false }))
@@ -434,5 +444,109 @@ describe('a key saved by `clawrouter login` is honoured', () => {
     const text = result?.result.kind === 'success' ? result.result.text : ''
     expect(text).not.toMatch(/account/i)
     expect(seen.filter(request => request.url.endsWith('/v1/credits'))).toHaveLength(0)
+  }, 30_000)
+})
+
+describe('/blockrun switches the credential the way `clawrouter login` does', () => {
+  const KEY = `brk_live_${'L'.repeat(40)}`
+
+  /** A deployment with no credential and a key file path that does not exist yet. */
+  async function fresh(): Promise<{ lines: string[]; path: string }> {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-clawrouter-login-'))
+    const path = join(dir, 'nested', '.api-key')
+    return {
+      path,
+      lines: [...ABSENT, `    apiKeyFiles: ['${path}']`, `    apiKeyUrl: '${apiUrl.replace(/\/api$/, '')}'`, ...local()],
+    }
+  }
+
+  /** `agent()` registers on every call, and these tests issue several commands per context. */
+  const owners = new WeakMap<Context, Agent>()
+  function owner(ctx: Context): Agent {
+    const known = owners.get(ctx) ?? agent(ctx)
+    owners.set(ctx, known)
+    return known
+  }
+
+  async function command(ctx: Context, line: string): Promise<{ kind: string; text: string }> {
+    const execution = await ctx.commands.execute(owner(ctx), line, [], new AbortController().signal)
+    expect(execution, `${line} did not resolve`).toBeDefined()
+    return execution!.result as { kind: string; text: string }
+  }
+
+  it('saves a key the host accepts, owner-readable only, and the next request uses it', async () => {
+    const { lines, path } = await fresh()
+    const ctx = await boot(lines)
+    expect(failureCode(await drain(ctx, 'blockrun'))).toBe('MISSING_CREDENTIAL')
+
+    const result = await command(ctx, `/blockrun login ${KEY}`)
+    expect(result.kind).toBe('success')
+    expect(result.text).toMatch(/Account credit: \$41\.20 remaining/)
+    expect(result.text).not.toContain(KEY)
+    expect((await readFile(path, 'utf8')).trim()).toBe(KEY)
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+
+    // No reload: the credential is resolved per request.
+    expect(failureCode(await drain(ctx, 'blockrun'))).toBeUndefined()
+    expect(seen.filter(request => request.url.endsWith('/chat/completions')).at(-1)?.authorization).toBe(`Bearer ${KEY}`)
+  }, 30_000)
+
+  it('does not save a key the host rejects', async () => {
+    const { lines, path } = await fresh()
+    const ctx = await boot(lines)
+    const result = await command(ctx, `/blockrun login brk_live_REVOKED${'x'.repeat(30)}`)
+    expect(result.kind).toBe('error')
+    expect(result.text).toMatch(/rejected/)
+    await expect(stat(path)).rejects.toThrow()
+  }, 30_000)
+
+  it('refuses something that is not a BlockRun key before sending it anywhere', async () => {
+    const { lines, path } = await fresh()
+    const ctx = await boot(lines)
+    const before = seen.length
+    const result = await command(ctx, `/blockrun login 0x${'a'.repeat(64)}`)
+    expect(result.kind).toBe('error')
+    expect(seen.slice(before).filter(request => request.url.endsWith('/v1/credits'))).toHaveLength(0)
+    await expect(stat(path)).rejects.toThrow()
+  }, 30_000)
+
+  it('logs out by removing the file, and the route goes back to having no credential', async () => {
+    const { lines, path } = await fresh()
+    const ctx = await boot(lines)
+    await command(ctx, `/blockrun login ${KEY}`)
+    const result = await command(ctx, '/blockrun logout')
+    expect(result.text).toMatch(/Removed/)
+    await expect(stat(path)).rejects.toThrow()
+    expect(failureCode(await drain(ctx, 'blockrun'))).toBe('MISSING_CREDENTIAL')
+  }, 30_000)
+
+  it('reports the credential in use, and says so plainly when there is none', async () => {
+    const { lines } = await fresh()
+    const ctx = await boot(lines)
+    expect((await command(ctx, '/blockrun')).text).toMatch(/No BlockRun credential/)
+    await command(ctx, `/blockrun login ${KEY}`)
+    const status = (await command(ctx, '/blockrun status')).text
+    expect(status).toMatch(/BlockRun account key brk_live_LLLLL…LLLL/)
+    expect(status).toMatch(/Account credit/)
+  }, 30_000)
+
+  it('keeps the key out of the session log', async () => {
+    const { lines } = await fresh()
+    const ctx = await boot(lines)
+    const definition = ctx.commands.find(owner(ctx), 'blockrun')
+    // `command/run` records the raw argument unless the definition opts out,
+    // and the argument to `login` is a bearer credential.
+    expect(definition?.recordInput).toBe(false)
+  }, 30_000)
+
+  it('puts the account ledger beside what this process counted in /spend', async () => {
+    const { lines } = await fresh()
+    const ctx = await boot(lines)
+    await command(ctx, `/blockrun login ${KEY}`)
+    await drain(ctx, 'blockrun')
+    const text = (await command(ctx, '/spend')).text
+    expect(text).toMatch(/Account ledger since this process started: \$0\.0123 across 3 calls — this process recorded \$\S+ across 1\./)
+    expect(text).toMatch(/2 of those were not made here/)
+    expect(text).toMatch(/1 ledger call is not priced yet/)
   }, 30_000)
 })

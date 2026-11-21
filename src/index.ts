@@ -24,23 +24,27 @@ import type { BlockrunConnection } from './adapter.ts'
 import {
   API_KEY_PATTERN,
   catalogEndpoint,
+  checkApiKey,
+  clearSavedApiKeys,
   DEFAULT_API_KEY_FILES,
   DEFAULT_API_KEY_URL,
   DEFAULT_REQUEST_FEES,
   DEFAULT_SOLANA_API_URL,
-  fetchCreditBalance,
+  fetchLedgerSummary,
   formatCreditBalance,
   freeTierKey,
   maskApiKey,
   PORTAL_URL,
   readSavedApiKey,
+  saveApiKey,
   requestFeeFor,
   SOLANA_WALLET_KEY_PATTERN,
   WALLET_KEY_PATTERN,
 } from './auth.ts'
-import type { AuthResolver, BlockrunAuth } from './auth.ts'
+import type { AuthResolver, BlockrunAuth, LedgerSummary } from './auth.ts'
 import { BlockrunCatalog, DEFAULT_MAX_TOKENS_CEILING, VERIFIED_VISION_MODELS } from './catalog.ts'
 import { renderSpend, SpendMeter } from './spend.ts'
+import type { SpendSummary } from './spend.ts'
 // Side-effect type import: `ctx.commands` exists only once the commands
 // package has been imported for its declaration merging.
 import type {} from '@deepseek-ai/dsh-commands'
@@ -393,6 +397,8 @@ export function apply(ctx: Context, config: Config): void {
     },
   )
   const meter = new SpendMeter(config.requestFeeUsd ?? DEFAULT_REQUEST_FEE_USD)
+  /** When this route's meter began counting; the window a ledger read is compared over. */
+  const startedAt = new Date()
   const requestFees = {
     base: config.requestFeeUsd ?? DEFAULT_REQUEST_FEE_USD,
     solana: config.solanaRequestFeeUsd ?? DEFAULT_SOLANA_REQUEST_FEE_USD,
@@ -447,14 +453,128 @@ export function apply(ctx: Context, config: Config): void {
       return []
     }
     if (account === undefined) return []
-    const balance = await fetchCreditBalance(apiKeyUrl, account.key)
-    return [
-      '',
-      `BlockRun account key ${maskApiKey(account.key)} (from ${account.source}).`,
-      balance === undefined
+    const [check, ledger] = await Promise.all([
+      checkApiKey(apiKeyUrl, account.key),
+      fetchLedgerSummary(apiKeyUrl, account.key, startedAt),
+    ])
+    const lines = ['', `BlockRun account key ${maskApiKey(account.key)} (from ${account.source}).`]
+    if (check.verdict === 'rejected') {
+      lines.push(`The account host REJECTED this key — it is mistyped or revoked. Issue a new one at ${PORTAL_URL}/dashboard/keys.`)
+      return lines
+    }
+    lines.push(
+      check.balance === undefined
         ? `Credit could not be read just now; see ${PORTAL_URL}/dashboard/credits.`
-        : `Account credit: ${formatCreditBalance(balance)}. Top up at ${PORTAL_URL}/dashboard/credits.`,
+        : `Account credit: ${formatCreditBalance(check.balance)}. Top up at ${PORTAL_URL}/dashboard/credits.`,
+    )
+    if (ledger !== undefined) lines.push(...ledgerLines(ledger, meter.summary()))
+    return lines
+  }
+
+  /**
+   * The account ledger beside this process's own count, for the same window.
+   *
+   * Not a reconciliation in ClawRouter's sense — there is no per-call journal
+   * here to join on request ids — but it answers the question that one exists
+   * for: is the account being charged for more than this process did? The
+   * ledger running ahead is expected when the key is also in use elsewhere,
+   * and is the thing to look at when it is not.
+   */
+  const ledgerLines = (ledger: LedgerSummary, local: SpendSummary): string[] => {
+    const money = (value: number): string => `$${value.toFixed(value > 0 && value < 0.01 ? 6 : 4)}`
+    const lines = [
+      `Account ledger since this process started: ${money(ledger.usd)} across ${ledger.calls} call${ledger.calls === 1 ? '' : 's'}`
+      + ` — this process recorded ${money(local.accountUsd)} across ${local.accountCalls}.`,
     ]
+    if (ledger.calls > local.accountCalls) {
+      lines.push(
+        `  ${ledger.calls - local.accountCalls} of those were not made here: expected if this key is also used on another`
+        + ' machine or by another BlockRun tool, and worth a look at the dashboard if it is not.',
+      )
+    } else if (ledger.calls < local.accountCalls) {
+      lines.push('  The ledger is behind this process; recent calls can take a moment to appear.')
+    }
+    if (ledger.unpricedCalls > 0) {
+      lines.push(`  ${ledger.unpricedCalls} ledger call${ledger.unpricedCalls === 1 ? ' is' : 's are'} not priced yet and not in its total.`)
+    }
+    if (ledger.unavailableDays.length > 0) {
+      lines.push(`  The host could not read ${ledger.unavailableDays.join(', ')}; the ledger figure is missing those days.`)
+    }
+    if (ledger.countedThrough !== undefined) {
+      lines.push(`  The ledger figure is exact only through ${ledger.countedThrough}.`)
+    }
+    return lines
+  }
+
+  /**
+   * `/blockrun` — which credential this route is on, and the two verbs that
+   * change it.
+   *
+   * `login` and `logout` write the same file `clawrouter login` does, so the
+   * change reaches every BlockRun tool on the machine and not only this one.
+   * The key is checked against the account host before it is saved: a key the
+   * host rejects is not written, and a host that cannot be reached is not
+   * treated as a rejection.
+   */
+  const blockrunCommand = async (rawInput: string): Promise<{ kind: 'success' | 'error'; text: string }> => {
+    const [verb = 'status', ...rest] = rawInput.trim().split(/\s+/).filter(part => part.length > 0)
+    if (verb === 'login') {
+      const key = rest[0]
+      if (key === undefined || rest.length !== 1) {
+        return { kind: 'error', text: `Usage: /blockrun login brk_live_...   (issue a key at ${PORTAL_URL}/dashboard/keys)` }
+      }
+      const target = apiKeyFiles[0]
+      if (target === undefined) {
+        return { kind: 'error', text: '`apiKeyFiles` is empty, so this route reads and writes no key file. Export the key through `apiKeyEnv` instead.' }
+      }
+      if (!API_KEY_PATTERN.test(key)) {
+        return { kind: 'error', text: `That is not a BlockRun API key (expected it to start with "brk_"). Issue one at ${PORTAL_URL}/dashboard/keys.` }
+      }
+      const check = await checkApiKey(apiKeyUrl, key)
+      if (check.verdict === 'rejected') {
+        return { kind: 'error', text: `The account host rejected ${maskApiKey(key)} — mistyped or revoked. Nothing was saved.` }
+      }
+      const saved = await saveApiKey(key, target)
+      const shadowed = await readCredential(apiKeyRef)
+      return {
+        kind: 'success',
+        text: [
+          `Saved ${maskApiKey(key)} to ${saved} (readable by you only). Every BlockRun tool on this machine will use it.`,
+          check.verdict === 'accepted' && check.balance !== undefined
+            ? `Account credit: ${formatCreditBalance(check.balance)}.`
+            : 'The account host could not be reached to verify it, so it was saved unverified; run /blockrun to check.',
+          ...shadowed === undefined ? [] : [`Note: ${apiKeyRef} is also set and takes precedence over the saved key.`],
+          'It was typed into this session, so treat it as seen by whatever displays your input; revoke and reissue if that matters.',
+        ].join('\n'),
+      }
+    }
+    if (verb === 'logout') {
+      const removed = await clearSavedApiKeys(apiKeyFiles)
+      const stillSet = await readCredential(apiKeyRef) !== undefined
+      return {
+        kind: 'success',
+        text: [
+          removed.length === 0 ? 'No saved BlockRun key to remove.' : `Removed ${removed.join(' and ')}.`,
+          stillSet
+            ? `${apiKeyRef} is still set, so this route is still on the account; unset it to pay another way.`
+            : 'This route now pays from a wallet if one is configured, and otherwise reaches only the free models.',
+        ].join('\n'),
+      }
+    }
+    if (verb !== 'status') {
+      return { kind: 'error', text: 'Usage: /blockrun [status | login brk_live_... | logout]' }
+    }
+    const account = await accountLines()
+    if (account.length > 0) return { kind: 'success', text: account.slice(1).join('\n') }
+    const solana = await readCredential(solanaRef) !== undefined
+    const base = await readCredential(ref) !== undefined
+    return {
+      kind: 'success',
+      text: solana || base
+        ? `No BlockRun account key. Paying per call from a ${solana ? 'Solana' : 'Base'} wallet (${solana ? solanaRef : ref}).`
+          + ` To bill an account instead: /blockrun login brk_live_...`
+        : `No BlockRun credential, so only the free models are reachable. Sign in at ${PORTAL_URL}, issue a key, then: /blockrun login brk_live_...`,
+    }
   }
 
   // Optional child fiber: a composition with no command surface still routes
@@ -467,6 +587,15 @@ export function apply(ctx: Context, config: Config): void {
         kind: 'success',
         text: [renderSpend(meter.summary()), ...await accountLines()].join('\n'),
       }),
+    })
+    commandCtx.commands.register({
+      name: 'blockrun',
+      description: `the credential the ${provider} route is on; \`login\` / \`logout\` switch it`,
+      input: { hint: '[login brk_live_... | logout]' },
+      // The argument to `login` is a bearer credential. Left recorded, it
+      // would sit in the session log in plaintext for as long as the log does.
+      recordInput: false,
+      handler: invocation => blockrunCommand(invocation.rawInput),
     })
   })
 

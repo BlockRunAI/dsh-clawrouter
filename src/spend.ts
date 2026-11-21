@@ -113,6 +113,8 @@ interface Tally extends ModelSpend {
   estimatedCalls: number
   /** Account-billed cost accumulated from tokens x published rates. */
   tokenCostUsd: number
+  /** Paid calls billed to the account, priced or not. */
+  tokenCalls: number
   /** Substitutions by served model id, accumulated in place. */
   substitutions: Map<string, number>
 }
@@ -170,6 +172,10 @@ export interface SpendSummary {
   calls: number
   /** The scheme behind `totalUsd`; `none` when nothing has been charged yet. */
   basis: SpendBasis
+  /** Paid calls billed to the account in this process — what a ledger read is compared against. */
+  accountCalls: number
+  /** Their cost as this process priced them; unpriced calls are in the count and not in this. */
+  accountUsd: number
   /**
    * Wallet calls whose cost is the configured per-request figure rather than
    * the amount signed. Zero means every wallet figure in this summary is what
@@ -229,6 +235,7 @@ export class SpendMeter {
       costUsd: 0,
       flatCostUsd: 0,
       estimatedCalls: 0,
+      tokenCalls: 0,
       tokenCostUsd: 0,
       substitutions: new Map(),
     }
@@ -260,10 +267,12 @@ export class SpendMeter {
           entry.flatCostUsd += pricing.feeUsd ?? this.requestPriceUsd
         }
       } else if (pricing.rates === undefined) {
+        entry.tokenCalls += 1
         // Counted, never guessed. Zero would read as free and any invented
         // rate would read as fact.
         entry.unpricedCalls = (entry.unpricedCalls ?? 0) + 1
       } else {
+        entry.tokenCalls += 1
         entry.tokenCostUsd += (input / 1e6) * (pricing.rates.input ?? 0)
           + (usage.outputTokens / 1e6) * (pricing.rates.output ?? 0)
       }
@@ -302,6 +311,8 @@ export class SpendMeter {
       calls: byModel.reduce((sum, entry) => sum + entry.calls, 0),
       basis: flat && metered ? 'mixed' : flat ? 'per-request' : metered ? 'per-token' : 'none',
       estimatedCalls: tallies.reduce((sum, entry) => sum + entry.estimatedCalls, 0),
+      accountCalls: tallies.reduce((sum, entry) => sum + entry.tokenCalls, 0),
+      accountUsd: tallies.reduce((sum, entry) => sum + entry.tokenCostUsd, 0),
       inputTokens: byModel.reduce((sum, entry) => sum + entry.inputTokens, 0),
       outputTokens: byModel.reduce((sum, entry) => sum + entry.outputTokens, 0),
       // Summed from the rows rather than from the call count, so the total and

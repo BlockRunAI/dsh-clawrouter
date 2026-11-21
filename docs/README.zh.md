@@ -281,6 +281,8 @@ export BLOCKRUN_API_KEY=brk_live_...   # 也可以存进 credentials 服务
 3. 在 **[user.blockrun.ai/dashboard/keys](https://user.blockrun.ai/dashboard/keys)** 签发一把 Key。明文只显示一次，当场复制。
 4. `export BLOCKRUN_API_KEY=brk_live_...`
 
+也可以不设环境变量，直接在 harness 里登录——`/blockrun login brk_live_...` 会先向账户主机验证这把 Key，被主机拒绝的不会保存；通过后存到 `~/.blockrun/.api-key`，仅你本人可读。`/blockrun logout` 删除它，单独输入 `/blockrun` 则显示这条路由当前用的是哪种凭据。这把 Key 不会写进会话日志，但它毕竟是在界面里敲出来的；在终端里用 `clawrouter login` 写入的是同一个文件。
+
 **已经用 ClawRouter 登录过？那就什么都不用做了。** `clawrouter login brk_live_...` 会把 Key 存到 `~/.blockrun/.api-key`——这是 BlockRun 各个工具共用的位置；没有设置 `BLOCKRUN_API_KEY` 时，本插件会从那里读取。所以一次登录两边都生效，`clawrouter logout` 也会让两边一起切回去。设置了环境变量时，仍以环境变量为准。
 
 之后 `/spend` 会写明它正在用哪把 Key（打码显示）、从哪里读到的，并打印账户主机报告的剩余额度：
@@ -288,7 +290,11 @@ export BLOCKRUN_API_KEY=brk_live_...   # 也可以存进 credentials 服务
 ```
 BlockRun account key brk_live_Ab3xQ9…f8c1 (from ~/.blockrun/.api-key).
 Account credit: $41.20 remaining (spent $8.80). Top up at https://user.blockrun.ai/dashboard/credits.
+Account ledger since this process started: $0.0123 across 3 calls — this process recorded $0.0041 across 1.
+  2 of those were not made here: expected if this key is also used on another machine or by another BlockRun tool, and worth a look at the dashboard if it is not.
 ```
+
+最后两行是账户自己的账本（`GET /v1/usage/summary`）与本进程在同一时间窗口内的计数并排对照。账本才是权威；放在这里对照，是为了让「这把 Key 在你没想到的地方被用了」这件事，出现在你本来就会看的地方。它不等同于 ClawRouter 的 `reconcile`——本路由没有可按 request id 关联的逐次调用日志——需要逐笔核对时请用 `reconcile` 或账户后台。
 
 这样换来的是：**按真实 token 用量精确计费，没有每次调用费，也没有最低消费**，并且每一次调用都会写进你的账户账本——[`/dashboard/activity`](https://user.blockrun.ai/dashboard/activity) 上能看到每次调用的 request id、模型、token 数和金额，所以 `/spend` 和账单可以互相对账。
 

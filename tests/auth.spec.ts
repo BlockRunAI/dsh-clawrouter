@@ -4,14 +4,18 @@
 // worth catching here is a mismatch between them: a key sent to the host that
 // answers it 402, a catalog read anonymously against a host that answers 401,
 // or a wallet quietly paying for a call the reader put on an account.
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   API_KEY_PATTERN,
   catalogEndpoint,
+  checkApiKey,
+  clearSavedApiKeys,
   DEFAULT_API_KEY_FILES,
+  fetchLedgerSummary,
+  saveApiKey,
   fetchCreditBalance,
   formatCreditBalance,
   maskApiKey,
@@ -235,5 +239,44 @@ describe('the account credit line', () => {
 
   it('answers undefined, never an error, when the host cannot be reached', async () => {
     expect(await fetchCreditBalance('http://127.0.0.1:1', 'brk_live_x', 500)).toBeUndefined()
+  })
+})
+
+describe('saving and removing a key', () => {
+  const KEY = `brk_live_${'W'.repeat(40)}`
+  const scratch = (): Promise<string> => mkdtemp(join(tmpdir(), 'dsh-clawrouter-save-'))
+
+  it('creates the directory and writes the key readable by its owner only', async () => {
+    const path = join(await scratch(), 'a', 'b', '.api-key')
+    await saveApiKey(`  ${KEY}  `, path)
+    expect(await readFile(path, 'utf8')).toBe(`${KEY}\n`)
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+    expect(await readSavedApiKey([path])).toEqual({ key: KEY, path })
+  })
+
+  it('writes nothing for something that is not a key', async () => {
+    const path = join(await scratch(), '.api-key')
+    await expect(saveApiKey('sk-not-ours', path)).rejects.toThrow(/Not a BlockRun API key/)
+    await expect(stat(path)).rejects.toThrow()
+  })
+
+  it('removes every saved copy, not just the first', async () => {
+    const dir = await scratch()
+    const [first, second, missing] = [join(dir, 'one'), join(dir, 'two'), join(dir, 'three')]
+    await writeFile(first, KEY)
+    await writeFile(second, KEY)
+    // A key left in the older location would be used on the very next call.
+    expect(await clearSavedApiKeys([first, missing, second])).toEqual([first, second])
+    expect(await readSavedApiKey([first, second])).toBeUndefined()
+  })
+})
+
+describe('an unreachable account host says nothing about a key', () => {
+  it('is `unknown`, not `rejected`', async () => {
+    expect(await checkApiKey('http://127.0.0.1:1', 'brk_live_x', 500)).toEqual({ verdict: 'unknown' })
+  })
+
+  it('gives no ledger figure rather than a zero one', async () => {
+    expect(await fetchLedgerSummary('http://127.0.0.1:1', 'brk_live_x', new Date(), 500)).toBeUndefined()
   })
 })
